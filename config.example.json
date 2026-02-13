@@ -1,0 +1,22 @@
+{
+  "botToken": "your_telegram_bot_token_here",
+  "pairedUsers": [],
+  "outputMode": "text",
+  "outputDelayMs": 500,
+  "pollIntervalMs": 5000,
+  "idleTimeoutMs": 30000,
+  "screenLines": 50,
+  "tmuxSocket": "",
+  "terminal": "iterm2",
+  "font": {
+    "family": "Menlo, 'SF Mono', Consolas, 'DejaVu Sans Mono', 'PingFang SC', 'Noto Sans CJK SC', monospace",
+    "size": 14,
+    "lineHeight": 18,
+    "charWidth": 8.4
+  },
+  "customCommands": {
+    "git": { "command": "git $args", "description": "Git 操作（如 /git status）" },
+    "top": { "command": "htop", "description": "系统监控" },
+    "df": { "command": "df -h", "description": "磁盘用量" }
+  }
+}

@@ -1,0 +1,32 @@
+# 依赖
+node_modules/
+package-lock.json
+
+# 编译输出
+dist/
+
+# 日志
+*.log
+
+# 环境变量 / 密钥
+.env
+.env.*
+
+# 配置文件（含 botToken 等敏感信息）
+config.json
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# cligram 运行时
+.cligram/
+
+# AI
+.claude/

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+#
+# cligram CLI — 服务管理 & 前台运行
+#
+# 用法:
+#   cligram install   — 编译、注册系统服务并启动，同时安装本 CLI
+#   cligram uninstall — 停止并移除系统服务和 CLI
+#   cligram start     — 启动服务
+#   cligram stop      — 停止服务
+#   cligram restart   — 重启服务
+#   cligram status    — 查看服务状态
+#   cligram log       — 实时查看日志
+#   cligram run       — 前台运行（不通过系统服务）
+#
+
+set -euo pipefail
+
+# 定位项目根目录：沿符号链接找到真实脚本路径
+resolve_link() {
+  local src="$1"
+  while [ -L "$src" ]; do
+    local dir="$(cd "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    # 相对路径的符号链接需要基于所在目录解析
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  echo "$src"
+}
+
+REAL_SCRIPT="$(resolve_link "$0")"
+BIN_DIR="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)"
+PROJECT_DIR="$(cd "$BIN_DIR/.." && pwd)"
+SERVICE_SCRIPT="${PROJECT_DIR}/scripts/service.sh"
+
+case "${1:-}" in
+  install|uninstall|start|stop|restart|enable|disable|status|log)
+    exec bash "$SERVICE_SCRIPT" "$1"
+    ;;
+  run)
+    exec node "${PROJECT_DIR}/dist/index.js"
+    ;;
+  *)
+    echo "cligram v$(node -e "console.log(require('${PROJECT_DIR}/package.json').version)" 2>/dev/null || echo '?')"
+    echo ""
+    echo "用法: cligram <command>"
+    echo ""
+    echo "服务管理:"
+    echo "  install   — 编译、注册系统服务并启动"
+    echo "  uninstall — 停止并移除系统服务"
+    echo "  start     — 启动服务"
+    echo "  stop      — 停止服务"
+    echo "  restart   — 重启服务"
+    echo "  enable    — 开启开机自动启动"
+    echo "  disable   — 关闭开机自动启动"
+    echo "  status    — 查看服务状态"
+    echo "  log       — 实时查看日志"
+    echo ""
+    echo "其他:"
+    echo "  run       — 前台运行（不通过系统服务）"
+    if [ "${1:-}" != "" ]; then
+      echo ""
+      echo "未知命令: $1"
+      exit 1
+    fi
+    ;;
+esac
