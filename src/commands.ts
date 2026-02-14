@@ -6,13 +6,17 @@ import * as tmux from "./tmux.js";
 import { captureAndSend, sendScreen, getOrCreateMonitor } from "./output.js";
 import { getConfig, setOutputMode, type OutputMode } from "./config.js";
 
+function getAuthId(ctx: Context): number | null {
+  return ctx.from?.id ?? ctx.chat?.id ?? null;
+}
+
 // Middleware: require paired user for most commands
 function authMiddleware(
   ctx: Context,
   next: () => Promise<void>,
 ): Promise<void> | void {
-  const chatId = ctx.chat?.id;
-  if (!chatId || !isPaired(chatId)) {
+  const authId = getAuthId(ctx);
+  if (!authId || !isPaired(authId)) {
     return ctx.reply("未配对。请先发送 /pair <配对码> 进行配对。") as unknown as void;
   }
   return next();
@@ -38,11 +42,14 @@ export function registerCommands(bot: Telegraf): void {
     if (!code) {
       return ctx.reply("用法: /pair <配对码>");
     }
-    const chatId = ctx.chat.id;
-    if (isPaired(chatId)) {
+    const authId = getAuthId(ctx);
+    if (!authId) {
+      return ctx.reply("无法识别当前用户，无法完成配对。");
+    }
+    if (isPaired(authId)) {
       return ctx.reply("你已经配对过了。");
     }
-    if (tryPair(chatId, code)) {
+    if (tryPair(authId, code)) {
       return ctx.reply("配对成功！现在可以使用终端指令了。\n发送 /help 查看可用指令。");
     }
     return ctx.reply("配对码错误，请重试。");
@@ -51,7 +58,10 @@ export function registerCommands(bot: Telegraf): void {
   // --- Authenticated commands ---
 
   bot.command("unpair", authMiddleware, (ctx) => {
-    unpair(ctx.chat.id);
+    const authId = getAuthId(ctx);
+    if (authId) {
+      unpair(authId);
+    }
     ctx.reply("已取消配对。");
   });
 

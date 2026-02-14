@@ -126,15 +126,26 @@ EOF
 
 # ── 统一命令实现 ──
 
-ensure_built() {
-  if [ ! -f "$ENTRY_POINT" ]; then
-    echo "dist/index.js 不存在，先执行编译..."
-    (cd "$PROJECT_DIR" && npm run build)
+build_project() {
+  echo "编译项目..."
+  (cd "$PROJECT_DIR" && npm run build)
+}
+
+is_service_installed() {
+  if [ "$PLATFORM" = "macos" ]; then
+    [ -f "$PLIST_PATH" ]
+  else
+    [ -f "$UNIT_PATH" ]
   fi
 }
 
 cmd_install() {
-  ensure_built
+  if is_service_installed; then
+    echo "检测到服务已安装，执行覆盖升级..."
+    cmd_uninstall_service
+  fi
+
+  build_project
   mkdir -p "$LOG_DIR"
 
   # 注册全局 CLI 命令
@@ -142,10 +153,6 @@ cmd_install() {
   (cd "$PROJECT_DIR" && npm link 2>/dev/null) || echo "警告: npm link 失败，cligram 命令可能不可用（可尝试 sudo npm link）"
 
   if [ "$PLATFORM" = "macos" ]; then
-    if [ -f "$PLIST_PATH" ]; then
-      echo "检测到已有服务，先卸载..."
-      cmd_uninstall_service
-    fi
     mkdir -p "$(dirname "$PLIST_PATH")"
     generate_plist > "$PLIST_PATH"
     launchctl load "$PLIST_PATH"
@@ -154,10 +161,6 @@ cmd_install() {
     echo ""
     echo "  plist: $PLIST_PATH"
   else
-    if [ -f "$UNIT_PATH" ]; then
-      echo "检测到已有服务，先卸载..."
-      cmd_uninstall_service
-    fi
     mkdir -p "$UNIT_DIR"
     generate_unit > "$UNIT_PATH"
     systemctl --user daemon-reload
