@@ -1,30 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { loadConfig } from "../src/config.ts";
 import {
   __resetAuthStateForTests,
   isPaired,
-  refreshPairCode,
-  tryPair,
+  loadPairedUsersFromConfig,
+  pairUser,
   unpair,
 } from "../src/auth.ts";
 import { createTempConfig, withArgvConfig } from "./helpers.ts";
 
-function wrongCodeFor(code: string): string {
-  return code === "000000" ? "000001" : "000000";
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-test("auth: pair and unpair updates state and config", async () => {
+test("auth: pairUser and unpair persist paired users", async () => {
   const configPath = await createTempConfig();
 
   await withArgvConfig(configPath, async () => {
     await loadConfig();
     __resetAuthStateForTests();
+    loadPairedUsersFromConfig();
 
-    const code = refreshPairCode();
-    const paired = await tryPair(42, code);
-    assert.equal(paired.ok, true);
+    const paired = await pairUser(42);
+    assert.equal(paired, "paired");
     assert.equal(isPaired(42), true);
 
     const removed = await unpair(42);
@@ -38,25 +38,20 @@ test("auth: pair and unpair updates state and config", async () => {
   assert.deepEqual(persisted.pairedUsers, []);
 });
 
-test("auth: wrong code increments failure and enforces cooldown", async () => {
+test("auth: isPaired picks up external config changes", async () => {
   const configPath = await createTempConfig();
 
   await withArgvConfig(configPath, async () => {
     await loadConfig();
     __resetAuthStateForTests();
+    loadPairedUsersFromConfig();
+    assert.equal(isPaired(99), false);
 
-    const code = refreshPairCode();
-    let lastResult = await tryPair(7, wrongCodeFor(code));
-    assert.equal(lastResult.ok, false);
-    assert.equal(lastResult.reason, "invalid");
-    assert.equal(lastResult.remainingAttempts, 4);
+    const raw = JSON.parse(await readFile(configPath, "utf-8")) as Record<string, unknown>;
+    raw.pairedUsers = [99];
+    await sleep(10);
+    await writeFile(configPath, JSON.stringify(raw, null, 2) + "\n", "utf-8");
 
-    for (let i = 0; i < 4; i++) {
-      lastResult = await tryPair(7, wrongCodeFor(code));
-    }
-
-    assert.equal(lastResult.ok, false);
-    assert.equal(lastResult.reason, "cooldown");
-    assert.ok(lastResult.retryAfterMs > 0);
+    assert.equal(isPaired(99), true);
   });
 });

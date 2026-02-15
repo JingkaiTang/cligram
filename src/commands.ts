@@ -1,10 +1,11 @@
 import { Telegraf, Context } from "telegraf";
 import { message } from "telegraf/filters";
-import { isPaired, tryPair, unpair } from "./auth.js";
+import { isPaired, unpair } from "./auth.js";
 import { ensureSession, resetSession, attachSession, detachSession, getCurrentSession, getSessionName } from "./session.js";
 import * as tmux from "./tmux.js";
 import { captureAndSend, sendScreen, getOrCreateMonitor, stopMonitor } from "./output.js";
 import { getConfig, getOutputMode, setOutputMode, isCommandAllowed, type OutputMode } from "./config.js";
+import { createPairRequest } from "./pair-request.js";
 
 function getAuthId(ctx: Context): number | null {
   return ctx.from?.id ?? ctx.chat?.id ?? null;
@@ -17,7 +18,7 @@ function authMiddleware(
 ): Promise<void> | void {
   const authId = getAuthId(ctx);
   if (!authId || !isPaired(authId)) {
-    return ctx.reply("未配对。请先发送 /pair <配对码> 进行配对。") as unknown as void;
+    return ctx.reply("未配对。请先发送 /pair 获取配对码，然后在 cligram 所在机器执行 cligram pair approve <配对码>。") as unknown as void;
   }
   return next();
 }
@@ -33,14 +34,14 @@ export function registerCommands(bot: Telegraf): void {
 
   bot.start((ctx) => {
     ctx.reply(
-      "欢迎使用 cligram！\n\n请发送 /pair <配对码> 完成配对后开始使用。\n配对码可在启动 cligram 的终端中找到。",
+      "欢迎使用 cligram！\n\n请发送 /pair 获取配对码，再在 cligram 所在机器执行 cligram pair approve <配对码> 完成配对。",
     );
   });
 
   bot.command("pair", async (ctx) => {
-    const code = ctx.message.text.split(/\s+/)[1] ?? "";
-    if (!code) {
-      return ctx.reply("用法: /pair <配对码>");
+    const arg = ctx.message.text.replace(/^\/pair(?:@\w+)?\s*/i, "").trim();
+    if (arg) {
+      return ctx.reply("新配对流程：请直接发送 /pair 获取配对码，然后在 cligram 所在机器执行 cligram pair approve <配对码>。");
     }
     const authId = getAuthId(ctx);
     if (!authId) {
@@ -50,21 +51,19 @@ export function registerCommands(bot: Telegraf): void {
       return ctx.reply("你已经配对过了。");
     }
     try {
-      const result = await tryPair(authId, code);
-      if (result.ok) {
-        return ctx.reply("配对成功！现在可以使用终端指令了。\n发送 /help 查看可用指令。");
+      const result = await createPairRequest(authId, ctx.chat?.id ?? authId, ctx.from?.username);
+      if (!result.ok) {
+        const retryMinutes = Math.max(1, Math.ceil(result.retryAfterMs / 60000));
+        return ctx.reply(`你在 1 小时内只能申请 1 次配对码。请约 ${retryMinutes} 分钟后重试。`);
       }
-      if (result.reason === "invalid") {
-        return ctx.reply(`配对码错误，请重试。剩余尝试次数: ${result.remainingAttempts}`);
-      }
-      if (result.reason === "expired") {
-        return ctx.reply("配对码已过期，请在 cligram 终端或日志中查看新配对码后重试。");
-      }
-      const retrySeconds = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
-      return ctx.reply(`配对失败次数过多，请 ${retrySeconds} 秒后再试，并使用最新配对码。`);
+      const expireAt = new Date(result.expiresAt).toLocaleString("zh-CN", { hour12: false });
+      return ctx.reply(
+        `配对码：<code>${result.code}</code>\n有效期至：${expireAt}\n\n请在 cligram 所在机器执行：\n<code>cligram pair approve ${result.code}</code>`,
+        { parse_mode: "HTML" },
+      );
     } catch (err) {
-      console.error("配对状态写盘失败:", err);
-      return ctx.reply("配对失败：配置写入失败，请稍后重试。");
+      console.error("创建配对请求失败:", err);
+      return ctx.reply("配对请求创建失败，请稍后重试。");
     }
   });
 
@@ -103,7 +102,7 @@ export function registerCommands(bot: Telegraf): void {
       "/shift + &lt;key&gt; — Shift 组合键",
       "/cmd + &lt;key&gt; — Cmd 组合键 (映射为 Ctrl)",
       "/unpair — 取消配对",
-      "/pair &lt;配对码&gt; — 配对设备",
+      "/pair — 申请配对码（需在本机执行 cligram pair approve &lt;配对码&gt; 批准）",
       "",
       "<b>会话管理:</b>",
       "/sessions — 列出所有 tmux 会话",

@@ -1,91 +1,77 @@
 import { readFile, unlink } from "node:fs/promises";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import { getConfig, getCligramHome, saveConfig } from "./config.js";
+import { getConfig, getCligramHome, getConfigPath, saveConfig } from "./config.js";
 import { logInfo, logWarn } from "./logger.js";
 
-let pairCode: string = "";
-let pairCodeGeneratedAt = 0;
-let failedPairAttempts = 0;
-let pairCooldownUntil = 0;
 const pairedUsers = new Set<number>();
+let lastConfigMtimeMs = 0;
 
-const PAIR_CODE_TTL_MS = 10 * 60 * 1000;
-const PAIR_MAX_FAILS = 5;
-const PAIR_COOLDOWN_MS = 60 * 1000;
-
-export type PairAttemptResult =
-  | { ok: true }
-  | { ok: false; reason: "invalid"; remainingAttempts: number }
-  | { ok: false; reason: "expired" }
-  | { ok: false; reason: "cooldown"; retryAfterMs: number };
-
-function generateCode(): string {
-  return crypto.randomInt(100000, 999999).toString();
-}
-
-function issuePairCode(): string {
-  pairCode = generateCode();
-  pairCodeGeneratedAt = Date.now();
-  return pairCode;
-}
-
-function announcePairCode(message: string): void {
-  logInfo("auth.pair", message, { pairCode });
-  logInfo("auth.pair", "send /pair <code> in Telegram to pair", { pairCode });
-}
-
-export function refreshPairCode(): string {
-  failedPairAttempts = 0;
-  pairCooldownUntil = 0;
-  return issuePairCode();
-}
-
-export function getCurrentPairCode(): string {
-  return pairCode;
-}
-
-export function isPaired(chatId: number): boolean {
-  return pairedUsers.has(chatId);
-}
-
-export async function tryPair(chatId: number, code: string): Promise<PairAttemptResult> {
-  const now = Date.now();
-  if (pairCooldownUntil > now) {
-    return { ok: false, reason: "cooldown", retryAfterMs: pairCooldownUntil - now };
-  }
-  if (!pairCodeGeneratedAt || now - pairCodeGeneratedAt > PAIR_CODE_TTL_MS) {
-    const nextCode = refreshPairCode();
-    announcePairCode(`配对码已过期，已生成新的配对码: ${nextCode}`);
-    return { ok: false, reason: "expired" };
-  }
-  if (code !== pairCode) {
-    failedPairAttempts += 1;
-    const remainingAttempts = Math.max(0, PAIR_MAX_FAILS - failedPairAttempts);
-    if (remainingAttempts === 0) {
-      pairCooldownUntil = Date.now() + PAIR_COOLDOWN_MS;
-      failedPairAttempts = 0;
-      const nextCode = issuePairCode();
-      announcePairCode(
-        `配对失败次数过多，进入冷却 ${Math.ceil(PAIR_COOLDOWN_MS / 1000)} 秒，已生成新的配对码: ${nextCode}`,
-      );
-      return { ok: false, reason: "cooldown", retryAfterMs: PAIR_COOLDOWN_MS };
+function replacePairedUsers(ids: number[]): void {
+  pairedUsers.clear();
+  for (const id of ids) {
+    if (Number.isInteger(id)) {
+      pairedUsers.add(id);
     }
-    return { ok: false, reason: "invalid", remainingAttempts };
   }
-  pairedUsers.add(chatId);
+}
+
+function updateConfigMtimeCache(): void {
+  const configPath = getConfigPath();
+  if (!configPath) return;
+  try {
+    lastConfigMtimeMs = statSync(configPath).mtimeMs;
+  } catch {
+    // ignore
+  }
+}
+
+function syncPairedUsersFromDiskIfChanged(): void {
+  const configPath = getConfigPath();
+  if (!configPath) {
+    return;
+  }
+  try {
+    const mtimeMs = statSync(configPath).mtimeMs;
+    if (mtimeMs <= lastConfigMtimeMs) {
+      return;
+    }
+    const raw = readFileSync(configPath, "utf-8");
+    const parsed = JSON.parse(raw) as { pairedUsers?: unknown };
+    const ids = Array.isArray(parsed.pairedUsers)
+      ? parsed.pairedUsers.filter((item): item is number => Number.isInteger(item))
+      : [];
+    replacePairedUsers(ids);
+    getConfig().pairedUsers = [...pairedUsers];
+    lastConfigMtimeMs = mtimeMs;
+  } catch (err) {
+    logWarn("auth.sync", "failed to sync paired users from disk", { configPath }, err);
+  }
+}
+
+export function isPaired(authId: number): boolean {
+  syncPairedUsersFromDiskIfChanged();
+  return pairedUsers.has(authId);
+}
+
+export async function pairUser(authId: number): Promise<"paired" | "already_paired"> {
+  syncPairedUsersFromDiskIfChanged();
+  if (pairedUsers.has(authId)) {
+    return "already_paired";
+  }
+  pairedUsers.add(authId);
   try {
     await syncToConfig();
-    refreshPairCode();
-    return { ok: true };
+    return "paired";
   } catch (err) {
-    pairedUsers.delete(chatId);
+    pairedUsers.delete(authId);
     throw err;
   }
 }
 
-export async function unpair(chatId: number): Promise<boolean> {
-  const removed = pairedUsers.delete(chatId);
+export async function unpair(authId: number): Promise<boolean> {
+  syncPairedUsersFromDiskIfChanged();
+  const removed = pairedUsers.delete(authId);
   if (!removed) {
     return false;
   }
@@ -93,7 +79,7 @@ export async function unpair(chatId: number): Promise<boolean> {
     await syncToConfig();
     return true;
   } catch (err) {
-    pairedUsers.add(chatId);
+    pairedUsers.add(authId);
     throw err;
   }
 }
@@ -101,9 +87,8 @@ export async function unpair(chatId: number): Promise<boolean> {
 /** 从 config 的 pairedUsers 字段初始化内存集合 */
 export function loadPairedUsersFromConfig(): void {
   const cfg = getConfig();
-  for (const id of cfg.pairedUsers) {
-    pairedUsers.add(id);
-  }
+  replacePairedUsers(cfg.pairedUsers);
+  updateConfigMtimeCache();
 }
 
 /** 迁移旧的 paired-users.json 到 config.json */
@@ -139,13 +124,11 @@ async function syncToConfig(): Promise<void> {
   const cfg = getConfig();
   cfg.pairedUsers = [...pairedUsers];
   await saveConfig();
+  updateConfigMtimeCache();
 }
 
 // 仅用于测试
 export function __resetAuthStateForTests(): void {
-  pairCode = "";
-  pairCodeGeneratedAt = 0;
-  failedPairAttempts = 0;
-  pairCooldownUntil = 0;
   pairedUsers.clear();
+  lastConfigMtimeMs = 0;
 }

@@ -10,6 +10,8 @@
 #   cligram restart   — 重启服务
 #   cligram status    — 查看服务状态
 #   cligram log       — 实时查看日志
+#   cligram pair approve <配对码> — 本机批准 Telegram 配对请求
+#   cligram pair ls       — 查看当前待审批配对队列
 #   cligram run       — 前台运行（不通过系统服务）
 #
 
@@ -36,6 +38,17 @@ case "${1:-}" in
   install|uninstall|start|stop|restart|enable|disable|status|log)
     exec bash "$SERVICE_SCRIPT" "$1"
     ;;
+  pair)
+    if [ -z "${2:-}" ]; then
+      echo "用法: cligram pair approve <配对码>|ls"
+      exit 1
+    fi
+    if [ ! -f "${PROJECT_DIR}/dist/pair-cli.js" ]; then
+      echo "未找到 ${PROJECT_DIR}/dist/pair-cli.js，请先执行: npm run build"
+      exit 1
+    fi
+    exec node "${PROJECT_DIR}/dist/pair-cli.js" "${@:2}"
+    ;;
   run)
     exec node "${PROJECT_DIR}/dist/index.js"
     ;;
@@ -54,6 +67,7 @@ case "${1:-}" in
     echo "  disable   — 关闭开机自动启动"
     echo "  status    — 查看服务状态"
     echo "  log       — 实时查看日志"
+    echo "  pair      — 配对管理（用法: cligram pair approve <配对码> 或 cligram pair ls）"
     echo ""
     echo "其他:"
     echo "  run       — 前台运行（不通过系统服务）"

@@ -3,7 +3,6 @@ import { loadConfig, getConfig } from "./config.js";
 import {
   loadPairedUsersFromConfig,
   migrateLegacyPairedUsers,
-  refreshPairCode,
 } from "./auth.js";
 import { registerCommands } from "./commands.js";
 
@@ -13,12 +12,11 @@ async function main(): Promise<void> {
   loadPairedUsersFromConfig();
   await migrateLegacyPairedUsers();
 
-  const code = refreshPairCode();
   console.log("=================================");
   console.log("  cligram 已启动");
-  console.log(`  配对码: ${code}`);
+  console.log("  配对方式: Telegram 中发送 /pair 申请配对码");
+  console.log("  然后在本机执行: cligram pair approve <配对码>");
   console.log("=================================");
-  console.log("在 Telegram 中发送 /pair " + code + " 进行配对");
   console.log("");
 
   const bot = new Telegraf(getConfig().botToken);
