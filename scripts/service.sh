@@ -6,6 +6,45 @@
 
 set -euo pipefail
 
+die() {
+  echo "错误: $*"
+  exit 1
+}
+
+warn() {
+  echo "警告: $*"
+}
+
+has_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+require_cmd() {
+  local cmd="$1"
+  local hint="$2"
+  has_cmd "$cmd" || die "缺少命令 '$cmd'。$hint"
+}
+
+ensure_writable_dir() {
+  local dir="$1"
+  local hint="$2"
+  mkdir -p "$dir" 2>/dev/null || die "无法创建目录: $dir。$hint"
+  [ -w "$dir" ] || die "目录不可写: $dir。$hint"
+}
+
+require_runtime_entry() {
+  [ -f "$ENTRY_POINT" ] || die "未找到入口文件: $ENTRY_POINT。请先执行 'cligram install' 或 'npm run build'。"
+}
+
+require_config_hint() {
+  local config_path="$HOME/.cligram/config.json"
+  if [ ! -f "$config_path" ]; then
+    warn "未找到配置文件: $config_path。服务启动后可能立即退出。可先执行: mkdir -p ~/.cligram && cp config.example.json ~/.cligram/config.json"
+  elif [ ! -r "$config_path" ]; then
+    die "配置文件不可读: $config_path。请检查文件权限。"
+  fi
+}
+
 # ── 平台检测 ──
 
 OS="$(uname -s)"
@@ -13,8 +52,7 @@ case "$OS" in
   Darwin) PLATFORM="macos" ;;
   Linux)  PLATFORM="linux" ;;
   *)
-    echo "错误: 不支持的操作系统 $OS（仅支持 macOS 和 Linux）"
-    exit 1
+    die "不支持的操作系统 $OS（仅支持 macOS 和 Linux）"
     ;;
 esac
 
@@ -27,14 +65,13 @@ ERR_FILE="$LOG_DIR/cligram.err"
 ENTRY_POINT="${PROJECT_DIR}/dist/index.js"
 
 # 探测 node 绝对路径
-NODE_BIN="$(which node 2>/dev/null || true)"
+NODE_BIN="$(command -v node 2>/dev/null || true)"
 if [ -z "$NODE_BIN" ]; then
-  echo "错误: 找不到 node，请确保 node 已安装并在 PATH 中"
-  exit 1
+  die "找不到 node，请确保已安装 Node.js 并在 PATH 中（可用 'node -v' 验证）"
 fi
 
 # 探测 tmux 所在目录，加入 PATH
-TMUX_BIN="$(which tmux 2>/dev/null || true)"
+TMUX_BIN="$(command -v tmux 2>/dev/null || true)"
 EXTRA_PATHS=""
 if [ -n "$TMUX_BIN" ]; then
   EXTRA_PATHS="$(dirname "$TMUX_BIN")"
@@ -101,6 +138,45 @@ UNIT_NAME="cligram"
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT_PATH="${UNIT_DIR}/${UNIT_NAME}.service"
 
+check_install_environment() {
+  require_cmd "npm" "请安装 npm（通常随 Node.js 一起安装），并确保 'npm -v' 可用。"
+  require_cmd "tmux" "请先安装 tmux，并确保 'tmux -V' 可用。"
+
+  [ -d "$PROJECT_DIR" ] || die "项目目录不存在: $PROJECT_DIR"
+  [ -w "$PROJECT_DIR" ] || die "项目目录不可写: $PROJECT_DIR。请检查目录权限。"
+  [ -f "$PROJECT_DIR/package.json" ] || die "未找到 package.json：$PROJECT_DIR/package.json"
+
+  ensure_writable_dir "$LOG_DIR" "请检查 HOME 目录权限。"
+  require_config_hint
+
+  if [ "$PLATFORM" = "macos" ]; then
+    require_cmd "launchctl" "请在 macOS 上运行此脚本。"
+    ensure_writable_dir "$(dirname "$PLIST_PATH")" "请检查 LaunchAgents 目录权限。"
+  else
+    require_cmd "systemctl" "请安装/启用 systemd。"
+    ensure_writable_dir "$UNIT_DIR" "请检查 systemd user unit 目录权限。"
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
+      die "systemctl --user 不可用。请先登录图形会话，或启用 linger（例如: loginctl enable-linger $USER）。"
+    fi
+  fi
+}
+
+check_runtime_environment() {
+  require_cmd "tmux" "请先安装 tmux，并确保 'tmux -V' 可用。"
+  require_runtime_entry
+  require_config_hint
+  ensure_writable_dir "$LOG_DIR" "请检查日志目录权限。"
+
+  if [ "$PLATFORM" = "linux" ]; then
+    require_cmd "systemctl" "请安装/启用 systemd。"
+    if ! systemctl --user show-environment >/dev/null 2>&1; then
+      die "systemctl --user 不可用。请先登录图形会话，或启用 linger（例如: loginctl enable-linger $USER）。"
+    fi
+  else
+    require_cmd "launchctl" "请在 macOS 上运行此脚本。"
+  fi
+}
+
 generate_unit() {
   cat <<EOF
 [Unit]
@@ -128,7 +204,10 @@ EOF
 
 build_project() {
   echo "编译项目..."
-  (cd "$PROJECT_DIR" && npm run build)
+  (
+    cd "$PROJECT_DIR"
+    npm run build
+  ) || die "项目编译失败。请先修复构建错误后重试。"
 }
 
 is_service_installed() {
@@ -140,6 +219,8 @@ is_service_installed() {
 }
 
 cmd_install() {
+  check_install_environment
+
   if is_service_installed; then
     echo "检测到服务已安装，执行覆盖升级..."
     cmd_uninstall_service
@@ -214,6 +295,8 @@ cmd_uninstall() {
 }
 
 cmd_start() {
+  check_runtime_environment
+
   if [ "$PLATFORM" = "macos" ]; then
     if [ ! -f "$PLIST_PATH" ]; then
       echo "服务未安装，请先执行: cligram install"
@@ -248,6 +331,8 @@ cmd_stop() {
 }
 
 cmd_restart() {
+  check_runtime_environment
+
   if [ "$PLATFORM" = "macos" ]; then
     cmd_stop
     sleep 1

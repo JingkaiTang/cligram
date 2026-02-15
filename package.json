@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
     "start": "node dist/index.js",
     "service:install": "bash scripts/service.sh install",
     "service:uninstall": "bash scripts/service.sh uninstall",

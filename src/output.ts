@@ -47,6 +47,55 @@ function detectInteractivePrompt(text: string): boolean {
   return INTERACTIVE_PATTERNS.some((re) => re.test(text));
 }
 
+export function chunkEscapedText(
+  escaped: string,
+  maxMessageLength: number = MAX_MESSAGE_LENGTH,
+): string[] {
+  const wrapperOverhead = 13; // "<pre>" + "</pre>"
+  const maxChunkLength = Math.max(1, maxMessageLength - wrapperOverhead);
+  if (escaped.length <= maxChunkLength) {
+    return [escaped];
+  }
+
+  const chunks: string[] = [];
+  const lines = escaped.split("\n");
+  let chunk = "";
+
+  for (const line of lines) {
+    const candidate = chunk ? `${chunk}\n${line}` : line;
+    if (candidate.length <= maxChunkLength) {
+      chunk = candidate;
+      continue;
+    }
+
+    if (chunk) {
+      chunks.push(chunk);
+      chunk = "";
+    }
+
+    if (line.length <= maxChunkLength) {
+      chunk = line;
+      continue;
+    }
+
+    // 超长单行，按最大长度硬切块，避免发送失败
+    for (let start = 0; start < line.length; start += maxChunkLength) {
+      const part = line.slice(start, start + maxChunkLength);
+      if (part.length === maxChunkLength) {
+        chunks.push(part);
+      } else {
+        chunk = part;
+      }
+    }
+  }
+
+  if (chunk) {
+    chunks.push(chunk);
+  }
+
+  return chunks;
+}
+
 // ── 消息发送（支持分块）────────────────────────────
 
 async function sendHtmlMessage(
@@ -158,20 +207,7 @@ export async function captureAndSend(
     return;
   }
 
-  const lines = escaped.split("\n");
-  let chunk = "";
-  for (const line of lines) {
-    const candidate = chunk ? chunk + "\n" + line : line;
-    if (candidate.length + 13 > MAX_MESSAGE_LENGTH) {
-      if (chunk) {
-        await ctx.reply(`<pre>${chunk}</pre>`, { parse_mode: "HTML" });
-      }
-      chunk = line;
-    } else {
-      chunk = candidate;
-    }
-  }
-  if (chunk) {
+  for (const chunk of chunkEscapedText(escaped)) {
     await ctx.reply(`<pre>${chunk}</pre>`, { parse_mode: "HTML" });
   }
 }
@@ -231,20 +267,7 @@ export async function sendScreen(
     return;
   }
 
-  const lines = escaped.split("\n");
-  let chunk = "";
-  for (const line of lines) {
-    const candidate = chunk ? chunk + "\n" + line : line;
-    if (candidate.length + 13 > MAX_MESSAGE_LENGTH) {
-      if (chunk) {
-        await ctx.reply(`<pre>${chunk}</pre>`, { parse_mode: "HTML" });
-      }
-      chunk = line;
-    } else {
-      chunk = candidate;
-    }
-  }
-  if (chunk) {
+  for (const chunk of chunkEscapedText(escaped)) {
     await ctx.reply(`<pre>${chunk}</pre>`, { parse_mode: "HTML" });
   }
 }

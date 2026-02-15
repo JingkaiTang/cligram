@@ -140,3 +140,12 @@ async function syncToConfig(): Promise<void> {
   cfg.pairedUsers = [...pairedUsers];
   await saveConfig();
 }
+
+// 仅用于测试
+export function __resetAuthStateForTests(): void {
+  pairCode = "";
+  pairCodeGeneratedAt = 0;
+  failedPairAttempts = 0;
+  pairCooldownUntil = 0;
+  pairedUsers.clear();
+}

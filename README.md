@@ -97,6 +97,8 @@ npm run service:install
 
 这会自动编译项目、注册系统服务、安装全局 `cligram` 命令，并立即启动。
 
+安装过程中会执行环境自检（`node`/`npm`/`tmux`、服务管理器可用性、目录写权限、配置文件可读性），失败时会给出具体修复提示。
+
 安装完成后，用 `cligram` 命令管理服务：
 
 ```bash
@@ -312,6 +314,16 @@ tmux new -s work
 
 - 标准输出：`~/.cligram/cligram.log`
 - 错误输出：`~/.cligram/cligram.err`
+
+## 测试
+
+运行单元测试：
+
+```bash
+npm test
+```
+
+当前覆盖重点：配置解析、配对流程、会话映射、命令解析、输出分块。
 
 ## License
 

@@ -28,7 +28,7 @@
 
 ## P2 - 低优先级
 
-- [ ] 提升服务脚本鲁棒性：补充环境自检（node/tmux/path/权限）及更明确的修复提示。
+- [x] 提升服务脚本鲁棒性：补充环境自检（node/tmux/path/权限）及更明确的修复提示。
   - 涉及：`scripts/service.sh`
-- [ ] 补充测试覆盖：优先配置解析、配对流程、会话映射、命令解析、输出分块。
+- [x] 补充测试覆盖：优先配置解析、配对流程、会话映射、命令解析、输出分块。
   - 涉及：`src/config.ts` `src/auth.ts` `src/session.ts` `src/commands.ts` `src/output.ts`

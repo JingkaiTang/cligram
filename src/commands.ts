@@ -380,7 +380,7 @@ export function registerCommands(bot: Telegraf): void {
   });
 }
 
-function parseModifierKey(text: string, modifier: string): string | null {
+export function parseModifierKey(text: string, modifier: string): string | null {
   // Match patterns like "/ctrl + c", "/ctrl c", "/ctrl+c"
   const pattern = new RegExp(`^/${modifier}\\s*\\+?\\s*(.+)$`, "i");
   const match = text.match(pattern);
