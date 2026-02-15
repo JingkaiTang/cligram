@@ -4,7 +4,7 @@ import { isPaired, tryPair, unpair } from "./auth.js";
 import { ensureSession, resetSession, attachSession, detachSession, getCurrentSession, getSessionName } from "./session.js";
 import * as tmux from "./tmux.js";
 import { captureAndSend, sendScreen, getOrCreateMonitor } from "./output.js";
-import { getConfig, setOutputMode, type OutputMode } from "./config.js";
+import { getConfig, getOutputMode, setOutputMode, type OutputMode } from "./config.js";
 
 function getAuthId(ctx: Context): number | null {
   return ctx.from?.id ?? ctx.chat?.id ?? null;
@@ -37,7 +37,7 @@ export function registerCommands(bot: Telegraf): void {
     );
   });
 
-  bot.command("pair", (ctx) => {
+  bot.command("pair", async (ctx) => {
     const code = ctx.message.text.split(/\s+/)[1] ?? "";
     if (!code) {
       return ctx.reply("用法: /pair <配对码>");
@@ -49,20 +49,39 @@ export function registerCommands(bot: Telegraf): void {
     if (isPaired(authId)) {
       return ctx.reply("你已经配对过了。");
     }
-    if (tryPair(authId, code)) {
-      return ctx.reply("配对成功！现在可以使用终端指令了。\n发送 /help 查看可用指令。");
+    try {
+      const result = await tryPair(authId, code);
+      if (result.ok) {
+        return ctx.reply("配对成功！现在可以使用终端指令了。\n发送 /help 查看可用指令。");
+      }
+      if (result.reason === "invalid") {
+        return ctx.reply(`配对码错误，请重试。剩余尝试次数: ${result.remainingAttempts}`);
+      }
+      if (result.reason === "expired") {
+        return ctx.reply("配对码已过期，请在 cligram 终端或日志中查看新配对码后重试。");
+      }
+      const retrySeconds = Math.max(1, Math.ceil(result.retryAfterMs / 1000));
+      return ctx.reply(`配对失败次数过多，请 ${retrySeconds} 秒后再试，并使用最新配对码。`);
+    } catch (err) {
+      console.error("配对状态写盘失败:", err);
+      return ctx.reply("配对失败：配置写入失败，请稍后重试。");
     }
-    return ctx.reply("配对码错误，请重试。");
   });
 
   // --- Authenticated commands ---
 
-  bot.command("unpair", authMiddleware, (ctx) => {
+  bot.command("unpair", authMiddleware, async (ctx) => {
     const authId = getAuthId(ctx);
-    if (authId) {
-      unpair(authId);
+    if (!authId) {
+      return ctx.reply("无法识别当前用户，无法取消配对。");
     }
-    ctx.reply("已取消配对。");
+    try {
+      await unpair(authId);
+      return ctx.reply("已取消配对。");
+    } catch (err) {
+      console.error("取消配对状态写盘失败:", err);
+      return ctx.reply("取消配对失败：配置写入失败，请稍后重试。");
+    }
   });
 
   bot.command("help", authMiddleware, (ctx) => {
@@ -119,10 +138,14 @@ export function registerCommands(bot: Telegraf): void {
     await sendScreen(ctx, target, pages);
   });
 
-  bot.command("mode", authMiddleware, (ctx) => {
+  bot.command("mode", authMiddleware, async (ctx) => {
+    const chatId = ctx.chat?.id;
+    if (!chatId) {
+      return ctx.reply("无法识别当前会话，无法切换输出模式。");
+    }
     const arg = ctx.message.text.replace(/^\/mode\s*/, "").trim().toLowerCase();
     if (!arg) {
-      const current = getConfig().outputMode;
+      const current = getOutputMode(chatId);
       return ctx.reply(`当前输出模式: <b>${current}</b>\n用法: /mode text 或 /mode image`, {
         parse_mode: "HTML",
       });
@@ -130,8 +153,13 @@ export function registerCommands(bot: Telegraf): void {
     if (arg !== "text" && arg !== "image") {
       return ctx.reply("无效模式。可选: text / image");
     }
-    setOutputMode(arg as OutputMode);
-    return ctx.reply(`输出模式已切换为: <b>${arg}</b>`, { parse_mode: "HTML" });
+    try {
+      await setOutputMode(arg as OutputMode, chatId);
+      return ctx.reply(`输出模式已切换为: <b>${arg}</b>`, { parse_mode: "HTML" });
+    } catch (err) {
+      console.error("保存输出模式失败:", err);
+      return ctx.reply("输出模式切换失败：配置写入失败。");
+    }
   });
 
   bot.command("new", authMiddleware, async (ctx) => {

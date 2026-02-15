@@ -74,6 +74,7 @@ cp config.example.json ~/.cligram/config.json
   "botToken": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
   "pairedUsers": [],
   "outputMode": "text",
+  "outputModeByChat": {},
   "tmuxSocket": "",
   "terminal": "iterm2"
 }
@@ -124,17 +125,19 @@ npm run dev
 ```
 =================================
   cligram 已启动
-  配对码: a1b2c3
+  配对码: 123456
 =================================
 ```
 
 在 Telegram 中打开你的 bot，发送：
 
 ```
-/pair a1b2c3
+/pair 123456
 ```
 
 配对成功后即可开始使用。
+
+如果配对码过期，或短时间内输错次数过多，cligram 会在终端/日志中输出新的配对码；请使用新配对码重试。
 
 ## 使用指南
 
@@ -218,6 +221,7 @@ tmux new -s work
   "botToken": "你的 Telegram Bot Token",
   "pairedUsers": [],
   "outputMode": "text",
+  "outputModeByChat": {},
   "outputDelayMs": 500,
   "pollIntervalMs": 5000,
   "idleTimeoutMs": 30000,
@@ -239,6 +243,7 @@ tmux new -s work
 | `botToken` | string | *必填* | Telegram Bot Token |
 | `pairedUsers` | number[] | `[]` | 已配对的用户 ID 列表（自动维护） |
 | `outputMode` | string | `"text"` | 输出模式：`text` 或 `image` |
+| `outputModeByChat` | object | `{}` | 按 chatId 保存的输出模式；未命中时回退到 `outputMode` |
 | `outputDelayMs` | number | `500` | 命令执行后等待输出的延迟（毫秒） |
 | `pollIntervalMs` | number | `5000` | 屏幕监控轮询间隔（毫秒） |
 | `idleTimeoutMs` | number | `30000` | 屏幕无变化自动停止监控的超时（毫秒） |

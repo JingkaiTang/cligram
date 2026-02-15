@@ -2,15 +2,15 @@
 
 ## P0 - 高优先级
 
-- [ ] 持久化输出模式：`/mode` 当前只改内存，重启后丢失。将模式更新写回配置文件。
+- [x] 持久化输出模式：`/mode` 当前只改内存，重启后丢失。将模式更新写回配置文件。
   - 涉及：`src/config.ts` `src/commands.ts`
-- [ ] 让配对状态写盘可等待：`tryPair/unpair` 现在异步落盘且未等待，异常退出可能丢状态。
+- [x] 让配对状态写盘可等待：`tryPair/unpair` 现在异步落盘且未等待，异常退出可能丢状态。
   - 涉及：`src/auth.ts` `src/commands.ts`
-- [ ] 强化配对安全：增加配对码有效期（TTL）、失败次数限制、冷却时间。
+- [x] 强化配对安全：增加配对码有效期（TTL）、失败次数限制、冷却时间。
   - 涉及：`src/auth.ts`
-- [ ] 将输出模式改为按 chat 隔离，避免多用户互相影响。
+- [x] 将输出模式改为按 chat 隔离，避免多用户互相影响。
   - 涉及：`src/config.ts` `src/commands.ts` `src/output.ts`
-- [ ] 修复 `openInTerminal` 命令拼接的转义/注入风险，统一参数转义。
+- [x] 修复 `openInTerminal` 命令拼接的转义/注入风险，统一参数转义。
   - 涉及：`src/tmux.ts`
 
 ## P1 - 中优先级

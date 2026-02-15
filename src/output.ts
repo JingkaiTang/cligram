@@ -24,6 +24,10 @@ function trimOutput(raw: string): string {
   return lines.join("\n");
 }
 
+function resolveChatId(ctx: Context): number | undefined {
+  return typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined;
+}
+
 // ── 交互提示检测 ─────────────────────────────────────
 
 const INTERACTIVE_PATTERNS = [
@@ -126,9 +130,10 @@ export async function captureAndSend(
   delayMs?: number,
 ): Promise<void> {
   await sleep(delayMs ?? getConfig().outputDelayMs);
+  const chatId = resolveChatId(ctx);
 
   // 图片模式：只截取可见屏幕，避免图片过长
-  if (isImageMode()) {
+  if (isImageMode(chatId)) {
     const raw = await tmux.captureVisible(target);
     const output = trimOutput(raw);
     if (!output) return;
@@ -182,6 +187,7 @@ export async function sendScreen(
 
   const raw = await tmux.capturePane(target, captureLines);
   const output = trimOutput(raw);
+  const chatId = resolveChatId(ctx);
 
   if (!output) {
     await ctx.reply("(屏幕为空)");
@@ -189,7 +195,7 @@ export async function sendScreen(
   }
 
   // 图片模式：按 screenLines 分页发送
-  if (isImageMode()) {
+  if (isImageMode(chatId)) {
     // 只保留最后 captureLines 行，避免 tmux 多返回导致多出一页
     let allLines = output.split("\n");
     if (allLines.length > captureLines) {
@@ -267,7 +273,7 @@ export class ScreenMonitor {
     // 用当前屏幕内容作为基线，避免首次 poll 误报
     // 截取方式须与 poll() 一致，否则基线不匹配会导致误报
     try {
-      const raw = isImageMode()
+      const raw = isImageMode(this.chatId)
         ? await tmux.captureVisible(this.target)
         : await tmux.capturePane(this.target);
       this.lastContent = trimOutput(raw);
@@ -304,7 +310,7 @@ export class ScreenMonitor {
     let raw: string;
     try {
       // 图片模式下只截取可见屏幕，文本模式截取完整历史
-      raw = isImageMode()
+      raw = isImageMode(this.chatId)
         ? await tmux.captureVisible(this.target)
         : await tmux.capturePane(this.target);
     } catch {
@@ -330,7 +336,7 @@ export class ScreenMonitor {
     const prefix = isInteractive ? "[需要操作] " : "[屏幕更新] ";
 
     // 图片模式：尝试发送图片，失败回退文本
-    if (isImageMode()) {
+    if (isImageMode(this.chatId)) {
       try {
         const ok = await sendImageMessage(this.chatId, this.ctx, content, prefix);
         if (ok) return;

@@ -5,6 +5,13 @@ import { getTmuxSocket, getTmuxSocketDir, getConfig, CAPTURE_LINES } from "./con
 
 const execFile = promisify(execFileCb);
 
+function shellEscape(value: string): string {
+  if (/^[A-Za-z0-9_/:.-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 function tmux(...args: string[]): Promise<{ stdout: string; stderr: string }> {
   const socket = getTmuxSocket();
   if (socket) {
@@ -115,9 +122,9 @@ async function buildAbsAttachCmd(sessionName: string): Promise<string> {
   const tmuxPath = await getTmuxAbsPath();
   const socket = getTmuxSocket();
   if (socket) {
-    return `${tmuxPath} -S ${socket} attach -t ${sessionName}`;
+    return `${shellEscape(tmuxPath)} -S ${shellEscape(socket)} attach -t ${shellEscape(sessionName)}`;
   }
-  return `${tmuxPath} attach -t ${sessionName}`;
+  return `${shellEscape(tmuxPath)} attach -t ${shellEscape(sessionName)}`;
 }
 
 /** 在本机配置的终端程序中打开新窗口并 attach 到指定 session */
@@ -127,26 +134,32 @@ export async function openInTerminal(sessionName: string): Promise<void> {
 
   if (terminal === "iterm2") {
     const script = `
-      tell application "iTerm2"
-        create window with default profile command "${attachCmd}"
-        activate
-      end tell
+      on run argv
+        set attachCmd to item 1 of argv
+        tell application "iTerm2"
+          create window with default profile command attachCmd
+          activate
+        end tell
+      end run
     `;
-    await execFile("osascript", ["-e", script]);
+    await execFile("osascript", ["-e", script, attachCmd]);
   } else if (terminal === "terminal") {
     const script = `
-      tell application "Terminal"
-        do script "${attachCmd}"
-        activate
-      end tell
+      on run argv
+        set attachCmd to item 1 of argv
+        tell application "Terminal"
+          do script attachCmd
+          activate
+        end tell
+      end run
     `;
-    await execFile("osascript", ["-e", script]);
+    await execFile("osascript", ["-e", script, attachCmd]);
   } else {
     // 自定义命令，替换占位符
     const socket = getTmuxSocket();
     const cmd = terminal
-      .replace(/\$SESSION/g, sessionName)
-      .replace(/\$SOCKET/g, socket);
+      .replace(/\$SESSION/g, shellEscape(sessionName))
+      .replace(/\$SOCKET/g, shellEscape(socket));
     await execFile("sh", ["-c", cmd]);
   }
 }

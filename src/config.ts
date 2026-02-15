@@ -26,6 +26,7 @@ export interface CligramConfig {
   botToken: string;
   pairedUsers: number[];
   outputMode: OutputMode;
+  outputModeByChat: Record<string, OutputMode>;
   /** 命令执行后等待输出的延迟（毫秒），默认 500 */
   outputDelayMs: number;
   /** 屏幕监控轮询间隔（毫秒），默认 5000 */
@@ -70,6 +71,7 @@ let config: CligramConfig = {
   botToken: "",
   pairedUsers: [],
   outputMode: "text",
+  outputModeByChat: {},
   outputDelayMs: DEFAULT_OUTPUT_DELAY_MS,
   pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
   idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
@@ -176,6 +178,19 @@ function parseCustomCommands(raw: unknown): Record<string, CustomCommand> {
   return result;
 }
 
+function parseOutputModeByChat(raw: unknown): Record<string, OutputMode> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const result: Record<string, OutputMode> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (value === "image" || value === "text") {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 export async function loadConfig(): Promise<CligramConfig> {
   cligramHome = path.join(os.homedir(), ".cligram");
   configPath = parseArgs() ?? path.join(cligramHome, "config.json");
@@ -209,6 +224,7 @@ export async function loadConfig(): Promise<CligramConfig> {
       : [],
     outputMode:
       parsed.outputMode === "image" ? "image" : "text",
+    outputModeByChat: parseOutputModeByChat(parsed.outputModeByChat),
     outputDelayMs: positiveInt(parsed.outputDelayMs, DEFAULT_OUTPUT_DELAY_MS),
     pollIntervalMs: positiveInt(parsed.pollIntervalMs, DEFAULT_POLL_INTERVAL_MS),
     idleTimeoutMs: positiveInt(parsed.idleTimeoutMs, DEFAULT_IDLE_TIMEOUT_MS),
@@ -241,10 +257,30 @@ export async function saveConfig(): Promise<void> {
 
 // ── 输出模式辅助函数 ───────────────────────────────
 
-export function isImageMode(): boolean {
-  return config.outputMode === "image";
+export function getOutputMode(chatId?: number): OutputMode {
+  if (typeof chatId === "number") {
+    return config.outputModeByChat[String(chatId)] ?? config.outputMode;
+  }
+  return config.outputMode;
 }
 
-export function setOutputMode(mode: OutputMode): void {
-  config.outputMode = mode;
+export function isImageMode(chatId?: number): boolean {
+  return getOutputMode(chatId) === "image";
+}
+
+export async function setOutputMode(mode: OutputMode, chatId?: number): Promise<void> {
+  const previous = config.outputMode;
+  const previousByChat = { ...config.outputModeByChat };
+  if (typeof chatId === "number") {
+    config.outputModeByChat[String(chatId)] = mode;
+  } else {
+    config.outputMode = mode;
+  }
+  try {
+    await saveConfig();
+  } catch (err) {
+    config.outputMode = previous;
+    config.outputModeByChat = previousByChat;
+    throw err;
+  }
 }
