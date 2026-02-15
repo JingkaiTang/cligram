@@ -5,6 +5,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 // ── 类型 ──────────────────────────────────────────────
 
 export type OutputMode = "text" | "image";
+export type CommandSafetyMode = "off" | "whitelist" | "blacklist";
 
 export interface CustomCommand {
   command: string;
@@ -27,6 +28,12 @@ export interface CligramConfig {
   pairedUsers: number[];
   outputMode: OutputMode;
   outputModeByChat: Record<string, OutputMode>;
+  /** 命令安全档位：off/whitelist/blacklist */
+  commandSafetyMode: CommandSafetyMode;
+  /** whitelist 模式下允许的命令名（首 token） */
+  commandAllowlist: string[];
+  /** blacklist 模式下禁止的命令名（首 token） */
+  commandBlocklist: string[];
   /** 命令执行后等待输出的延迟（毫秒），默认 500 */
   outputDelayMs: number;
   /** 屏幕监控轮询间隔（毫秒），默认 5000 */
@@ -72,6 +79,9 @@ let config: CligramConfig = {
   pairedUsers: [],
   outputMode: "text",
   outputModeByChat: {},
+  commandSafetyMode: "off",
+  commandAllowlist: [],
+  commandBlocklist: [],
   outputDelayMs: DEFAULT_OUTPUT_DELAY_MS,
   pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
   idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
@@ -138,6 +148,7 @@ const BUILTIN_COMMANDS = new Set([
   "right", "esc", "ctrl", "alt", "shift", "cmd",
   "sessions", "attach", "detach", "open",
 ]);
+const TELEGRAM_COMMAND_RE = /^[a-z0-9_]{1,32}$/;
 
 function parseFont(raw: unknown): FontConfig {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -158,6 +169,10 @@ function parseCustomCommands(raw: unknown): Record<string, CustomCommand> {
   }
   const result: Record<string, CustomCommand> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!TELEGRAM_COMMAND_RE.test(key)) {
+      console.warn(`警告: 自定义指令 "${key}" 不符合 Telegram 命令命名规范（仅限 a-z 0-9 _，长度 1-32），已跳过`);
+      continue;
+    }
     if (BUILTIN_COMMANDS.has(key)) {
       console.warn(`警告: 自定义指令 "${key}" 与内置指令同名，已跳过`);
       continue;
@@ -176,6 +191,27 @@ function parseCustomCommands(raw: unknown): Record<string, CustomCommand> {
     }
   }
   return result;
+}
+
+function parseCommandSafetyMode(raw: unknown): CommandSafetyMode {
+  if (raw === "whitelist" || raw === "blacklist") {
+    return raw;
+  }
+  return "off";
+}
+
+function parseCommandList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const set = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const token = item.trim().toLowerCase();
+    if (!token) continue;
+    set.add(token);
+  }
+  return [...set];
 }
 
 function parseOutputModeByChat(raw: unknown): Record<string, OutputMode> {
@@ -225,6 +261,9 @@ export async function loadConfig(): Promise<CligramConfig> {
     outputMode:
       parsed.outputMode === "image" ? "image" : "text",
     outputModeByChat: parseOutputModeByChat(parsed.outputModeByChat),
+    commandSafetyMode: parseCommandSafetyMode(parsed.commandSafetyMode),
+    commandAllowlist: parseCommandList(parsed.commandAllowlist),
+    commandBlocklist: parseCommandList(parsed.commandBlocklist),
     outputDelayMs: positiveInt(parsed.outputDelayMs, DEFAULT_OUTPUT_DELAY_MS),
     pollIntervalMs: positiveInt(parsed.pollIntervalMs, DEFAULT_POLL_INTERVAL_MS),
     idleTimeoutMs: positiveInt(parsed.idleTimeoutMs, DEFAULT_IDLE_TIMEOUT_MS),
@@ -266,6 +305,40 @@ export function getOutputMode(chatId?: number): OutputMode {
 
 export function isImageMode(chatId?: number): boolean {
   return getOutputMode(chatId) === "image";
+}
+
+function extractCommandToken(command: string): string {
+  const trimmed = command.trim().toLowerCase();
+  if (!trimmed) {
+    return "";
+  }
+  const idx = trimmed.indexOf(" ");
+  return idx === -1 ? trimmed : trimmed.slice(0, idx);
+}
+
+export function isCommandAllowed(command: string): {
+  allowed: boolean;
+  command: string;
+  reason?: string;
+} {
+  const token = extractCommandToken(command);
+  const mode = config.commandSafetyMode;
+  if (mode === "off") {
+    return { allowed: true, command: token };
+  }
+  if (!token) {
+    return { allowed: false, command: token, reason: "empty" };
+  }
+  if (mode === "whitelist") {
+    if (!config.commandAllowlist.includes(token)) {
+      return { allowed: false, command: token, reason: "not_in_allowlist" };
+    }
+    return { allowed: true, command: token };
+  }
+  if (config.commandBlocklist.includes(token)) {
+    return { allowed: false, command: token, reason: "in_blocklist" };
+  }
+  return { allowed: true, command: token };
 }
 
 export async function setOutputMode(mode: OutputMode, chatId?: number): Promise<void> {

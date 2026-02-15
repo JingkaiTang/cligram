@@ -3,8 +3,8 @@ import { message } from "telegraf/filters";
 import { isPaired, tryPair, unpair } from "./auth.js";
 import { ensureSession, resetSession, attachSession, detachSession, getCurrentSession, getSessionName } from "./session.js";
 import * as tmux from "./tmux.js";
-import { captureAndSend, sendScreen, getOrCreateMonitor } from "./output.js";
-import { getConfig, getOutputMode, setOutputMode, type OutputMode } from "./config.js";
+import { captureAndSend, sendScreen, getOrCreateMonitor, stopMonitor } from "./output.js";
+import { getConfig, getOutputMode, setOutputMode, isCommandAllowed, type OutputMode } from "./config.js";
 
 function getAuthId(ctx: Context): number | null {
   return ctx.from?.id ?? ctx.chat?.id ?? null;
@@ -77,6 +77,7 @@ export function registerCommands(bot: Telegraf): void {
     }
     try {
       await unpair(authId);
+      stopMonitor(ctx.chat.id);
       return ctx.reply("已取消配对。");
     } catch (err) {
       console.error("取消配对状态写盘失败:", err);
@@ -172,6 +173,10 @@ export function registerCommands(bot: Telegraf): void {
     const cmd = ctx.message.text.replace(/^\/exec\s*/, "");
     if (!cmd) {
       return ctx.reply("用法: /exec <command>");
+    }
+    const guard = isCommandAllowed(cmd);
+    if (!guard.allowed) {
+      return ctx.reply(buildCommandSafetyRejectMessage(guard.reason, guard.command));
     }
     const target = await ensureSession(ctx.chat.id);
     await tmux.sendTextAndEnter(target, cmd);
@@ -356,6 +361,10 @@ export function registerCommands(bot: Telegraf): void {
       } else {
         cmd = args ? `${def.command} ${args}` : def.command;
       }
+      const guard = isCommandAllowed(cmd);
+      if (!guard.allowed) {
+        return ctx.reply(buildCommandSafetyRejectMessage(guard.reason, guard.command));
+      }
       const target = await ensureSession(ctx.chat.id);
       await tmux.sendTextAndEnter(target, cmd);
       await captureAndSend(ctx, target);
@@ -377,4 +386,24 @@ function parseModifierKey(text: string, modifier: string): string | null {
   const match = text.match(pattern);
   if (!match) return null;
   return match[1].trim().toLowerCase();
+}
+
+function buildCommandSafetyRejectMessage(reason: string | undefined, command: string): string {
+  const cfg = getConfig();
+  if (reason === "empty") {
+    return "命令为空，已拒绝执行。";
+  }
+  if (cfg.commandSafetyMode === "whitelist") {
+    const allowed = cfg.commandAllowlist.length > 0
+      ? cfg.commandAllowlist.join(", ")
+      : "(未配置)";
+    return `安全策略已阻止命令执行。\n当前模式: whitelist\n命令: ${command || "(空)"}\n允许列表: ${allowed}`;
+  }
+  if (cfg.commandSafetyMode === "blacklist") {
+    const blocked = cfg.commandBlocklist.length > 0
+      ? cfg.commandBlocklist.join(", ")
+      : "(未配置)";
+    return `安全策略已阻止命令执行。\n当前模式: blacklist\n命令: ${command || "(空)"}\n禁止列表: ${blocked}`;
+  }
+  return "安全策略已阻止命令执行。";
 }

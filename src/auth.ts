@@ -2,6 +2,7 @@ import { readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { getConfig, getCligramHome, saveConfig } from "./config.js";
+import { logInfo, logWarn } from "./logger.js";
 
 let pairCode: string = "";
 let pairCodeGeneratedAt = 0;
@@ -30,8 +31,8 @@ function issuePairCode(): string {
 }
 
 function announcePairCode(message: string): void {
-  console.log(`[pair] ${message}`);
-  console.log(`[pair] 在 Telegram 中发送 /pair ${pairCode} 进行配对`);
+  logInfo("auth.pair", message, { pairCode });
+  logInfo("auth.pair", "send /pair <code> in Telegram to pair", { pairCode });
 }
 
 export function refreshPairCode(): string {
@@ -123,9 +124,13 @@ export async function migrateLegacyPairedUsers(): Promise<void> {
     }
     // 删除旧文件
     await unlink(legacyPath);
-    console.log("已迁移旧的 paired-users.json 到 config.json");
-  } catch {
-    // 旧文件不存在，忽略
+    logInfo("auth.migrate", "migrated legacy paired-users.json to config.json", { path: legacyPath });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") {
+      return;
+    }
+    logWarn("auth.migrate", "failed to migrate legacy paired users", { path: legacyPath }, err);
   }
 }
 

@@ -75,6 +75,9 @@ cp config.example.json ~/.cligram/config.json
   "pairedUsers": [],
   "outputMode": "text",
   "outputModeByChat": {},
+  "commandSafetyMode": "off",
+  "commandAllowlist": [],
+  "commandBlocklist": [],
   "tmuxSocket": "",
   "terminal": "iterm2"
 }
@@ -212,6 +215,8 @@ tmux new -s work
 
 `$args` 会被替换为指令后面的参数。
 
+自定义指令名必须符合 Telegram 规范：仅允许 `a-z`、`0-9`、`_`，长度 1-32。非法名称会在启动解析配置时被跳过并打印警告。
+
 ## 配置参考
 
 完整配置字段说明：
@@ -222,6 +227,9 @@ tmux new -s work
   "pairedUsers": [],
   "outputMode": "text",
   "outputModeByChat": {},
+  "commandSafetyMode": "off",
+  "commandAllowlist": [],
+  "commandBlocklist": [],
   "outputDelayMs": 500,
   "pollIntervalMs": 5000,
   "idleTimeoutMs": 30000,
@@ -244,6 +252,9 @@ tmux new -s work
 | `pairedUsers` | number[] | `[]` | 已配对的用户 ID 列表（自动维护） |
 | `outputMode` | string | `"text"` | 输出模式：`text` 或 `image` |
 | `outputModeByChat` | object | `{}` | 按 chatId 保存的输出模式；未命中时回退到 `outputMode` |
+| `commandSafetyMode` | string | `"off"` | 命令安全档位：`off`/`whitelist`/`blacklist` |
+| `commandAllowlist` | string[] | `[]` | `whitelist` 模式下允许执行的命令名（首 token） |
+| `commandBlocklist` | string[] | `[]` | `blacklist` 模式下禁止执行的命令名（首 token） |
 | `outputDelayMs` | number | `500` | 命令执行后等待输出的延迟（毫秒） |
 | `pollIntervalMs` | number | `5000` | 屏幕监控轮询间隔（毫秒） |
 | `idleTimeoutMs` | number | `30000` | 屏幕无变化自动停止监控的超时（毫秒） |
@@ -266,6 +277,13 @@ tmux new -s work
 - `"terminal"` — 内置预设，macOS 自带 Terminal.app
 - 自定义命令 — 支持 `$SESSION` 和 `$SOCKET` 占位符，如 `"alacritty -e tmux attach -t $SESSION"`
 - `""` — 不配置，`/open` 指令不可用
+
+### 命令安全档位
+
+- 当前作用于 `/exec` 与自定义指令执行路径。
+- `commandSafetyMode: "off"` — 不限制命令执行（默认）
+- `commandSafetyMode: "whitelist"` — 仅允许 `commandAllowlist` 中的命令（按首 token 匹配）
+- `commandSafetyMode: "blacklist"` — 拒绝 `commandBlocklist` 中的命令（按首 token 匹配）
 
 ### font
 

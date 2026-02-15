@@ -2,6 +2,7 @@ import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir } from "node:fs/promises";
 import { getTmuxSocket, getTmuxSocketDir, getConfig, CAPTURE_LINES } from "./config.js";
+import { logWarn } from "./logger.js";
 
 const execFile = promisify(execFileCb);
 
@@ -94,6 +95,17 @@ export async function captureVisible(target: string): Promise<string> {
   return stdout;
 }
 
+export async function paneSignature(target: string): Promise<string> {
+  const { stdout } = await tmux(
+    "display-message",
+    "-p",
+    "-t",
+    target,
+    "#{session_id}:#{window_id}:#{pane_id}:#{history_size}:#{cursor_x}:#{cursor_y}:#{pane_dead}:#{pane_current_command}",
+  );
+  return stdout.trim();
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -103,7 +115,8 @@ export async function listSessions(): Promise<string[]> {
   try {
     const { stdout } = await tmux("list-sessions", "-F", "#{session_name}");
     return stdout.trim().split("\n").filter(Boolean);
-  } catch {
+  } catch (err) {
+    logWarn("tmux.listSessions", "list-sessions failed", undefined, err);
     return [];
   }
 }

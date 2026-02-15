@@ -2,6 +2,7 @@ import type { Context } from "telegraf";
 import * as tmux from "./tmux.js";
 import { MAX_MESSAGE_LENGTH, isImageMode, getConfig } from "./config.js";
 import { renderTerminalImage } from "./render.js";
+import { logError, logWarn } from "./logger.js";
 
 // ── 工具函数 ─────────────────────────────────────────
 
@@ -97,7 +98,7 @@ async function replyWithImage(
     );
     return true;
   } catch (err) {
-    console.error("[replyWithImage] failed, falling back to text:", err);
+    logWarn("output.replyWithImage", "image render failed, fallback to text", undefined, err);
     return false;
   }
 }
@@ -117,7 +118,7 @@ async function sendImageMessage(
     );
     return true;
   } catch (err) {
-    console.error("[sendImageMessage] failed, falling back to text:", err);
+    logWarn("output.sendImageMessage", "image render failed, fallback to text", { chatId }, err);
     return false;
   }
 }
@@ -256,12 +257,15 @@ export class ScreenMonitor {
   private ctx: Context;
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastContent: string = "";
+  private lastSignature: string = "";
   private lastChangeAt: number = 0;
+  private onStop: (chatId: number) => void;
 
-  constructor(chatId: number, target: string, ctx: Context) {
+  constructor(chatId: number, target: string, ctx: Context, onStop: (chatId: number) => void) {
     this.chatId = chatId;
     this.target = target;
     this.ctx = ctx;
+    this.onStop = onStop;
   }
 
   /** 启动或重置监控 */
@@ -273,12 +277,16 @@ export class ScreenMonitor {
     // 用当前屏幕内容作为基线，避免首次 poll 误报
     // 截取方式须与 poll() 一致，否则基线不匹配会导致误报
     try {
+      this.lastSignature = await tmux.paneSignature(this.target);
       const raw = isImageMode(this.chatId)
         ? await tmux.captureVisible(this.target)
         : await tmux.capturePane(this.target);
       this.lastContent = trimOutput(raw);
-    } catch {
-      // ignore
+    } catch (err) {
+      logWarn("output.monitor.start", "failed to initialize monitor baseline", {
+        chatId: this.chatId,
+        target: this.target,
+      }, err);
     }
 
     if (this.timer) {
@@ -288,7 +296,10 @@ export class ScreenMonitor {
 
     this.timer = setInterval(() => {
       this.poll().catch((err) => {
-        console.error(`[ScreenMonitor chat=${this.chatId}] poll error:`, err);
+        logError("output.monitor.poll", "unexpected poll error", err, {
+          chatId: this.chatId,
+          target: this.target,
+        });
       });
     }, getConfig().pollIntervalMs);
   }
@@ -298,6 +309,7 @@ export class ScreenMonitor {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.onStop(this.chatId);
   }
 
   private async poll(): Promise<void> {
@@ -307,14 +319,35 @@ export class ScreenMonitor {
       return;
     }
 
+    let signature: string;
+    try {
+      signature = await tmux.paneSignature(this.target);
+    } catch (err) {
+      logWarn("output.monitor.poll", "failed to read pane signature, stop monitor", {
+        chatId: this.chatId,
+        target: this.target,
+      }, err);
+      this.stop();
+      return;
+    }
+
+    if (signature === this.lastSignature) {
+      return;
+    }
+    this.lastSignature = signature;
+
     let raw: string;
     try {
       // 图片模式下只截取可见屏幕，文本模式截取完整历史
       raw = isImageMode(this.chatId)
         ? await tmux.captureVisible(this.target)
         : await tmux.capturePane(this.target);
-    } catch {
+    } catch (err) {
       // tmux 会话可能已关闭
+      logWarn("output.monitor.poll", "failed to capture pane, stop monitor", {
+        chatId: this.chatId,
+        target: this.target,
+      }, err);
       this.stop();
       return;
     }
@@ -351,10 +384,9 @@ export class ScreenMonitor {
     try {
       await sendHtmlMessage(this.chatId, this.ctx, html);
     } catch (err) {
-      console.error(
-        `[ScreenMonitor chat=${this.chatId}] send error:`,
-        err,
-      );
+      logError("output.monitor.poll", "failed to send monitor message", err, {
+        chatId: this.chatId,
+      });
     }
   }
 }
@@ -370,8 +402,23 @@ export function getOrCreateMonitor(
 ): ScreenMonitor {
   let monitor = monitors.get(chatId);
   if (!monitor) {
-    monitor = new ScreenMonitor(chatId, target, ctx);
+    const created = new ScreenMonitor(chatId, target, ctx, (stoppedChatId) => {
+      const current = monitors.get(stoppedChatId);
+      if (current === created) {
+        monitors.delete(stoppedChatId);
+      }
+    });
+    monitor = created;
     monitors.set(chatId, monitor);
   }
   return monitor;
+}
+
+export function stopMonitor(chatId: number): boolean {
+  const monitor = monitors.get(chatId);
+  if (!monitor) {
+    return false;
+  }
+  monitor.stop();
+  return true;
 }
