@@ -25,6 +25,7 @@ async function main(): Promise<void> {
   // 设置 Bot 命令菜单（聊天输入框的快捷指令按钮）
   const builtinCommands = [
     { command: "exec", description: "执行命令" },
+    { command: "enter", description: "输入回车键" },
     { command: "cd", description: "切换目录" },
     { command: "ls", description: "列出文件" },
     { command: "pwd", description: "显示当前目录" },
@@ -35,7 +36,6 @@ async function main(): Promise<void> {
     { command: "attach", description: "绑定到指定 tmux 会话" },
     { command: "detach", description: "解绑当前会话" },
     { command: "open", description: "在本机终端打开当前会话" },
-    { command: "enter", description: "输入回车键" },
     { command: "up", description: "↑ 方向键" },
     { command: "down", description: "↓ 方向键" },
     { command: "esc", description: "Escape 键" },
