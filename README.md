@@ -306,6 +306,21 @@ tmux new -s work
 
 `npm run service:install` 会在 `~/.config/systemd/user/` 下创建 unit 文件，使用 `systemctl --user` 管理，不需要 root 权限。
 
+VPS / SSH 场景建议（重要）：
+
+- 必须启用 user linger，否则退出 SSH 后 `systemd --user` 可能停止，Bot 会离线。
+- 安装脚本会自动检查 `linger`，未开启时会提示并可引导执行：
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+可手动检查：
+
+```bash
+loginctl show-user "$USER" -p Linger
+```
+
 ### 日志
 
 日志文件位于：

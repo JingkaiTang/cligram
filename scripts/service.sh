@@ -15,6 +15,10 @@ warn() {
   echo "警告: $*"
 }
 
+info() {
+  echo "提示: $*"
+}
+
 has_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -30,6 +34,10 @@ ensure_writable_dir() {
   local hint="$2"
   mkdir -p "$dir" 2>/dev/null || die "无法创建目录: $dir。$hint"
   [ -w "$dir" ] || die "目录不可写: $dir。$hint"
+}
+
+is_interactive_tty() {
+  [ -t 0 ] && [ -t 1 ]
 }
 
 require_runtime_entry() {
@@ -138,6 +146,46 @@ UNIT_NAME="cligram"
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT_PATH="${UNIT_DIR}/${UNIT_NAME}.service"
 
+get_linger_state() {
+  local state
+  state="$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || true)"
+  if [ -z "$state" ]; then
+    echo "unknown"
+  else
+    echo "$state"
+  fi
+}
+
+ensure_linger_enabled() {
+  local state
+  state="$(get_linger_state)"
+
+  if [ "$state" = "yes" ]; then
+    return
+  fi
+
+  warn "检测到当前用户未启用 linger（Linger=${state}）。"
+  warn "在 VPS/SSH 场景下，这会导致你退出 SSH 后 systemd --user 与 cligram 一起停止。"
+
+  if is_interactive_tty; then
+    echo ""
+    read -r -p "是否现在尝试执行: sudo loginctl enable-linger ${USER} ? [y/N] " reply
+    if [[ "$reply" =~ ^[Yy]$ ]]; then
+      if ! sudo loginctl enable-linger "$USER"; then
+        die "启用 linger 失败。请手动执行: sudo loginctl enable-linger $USER"
+      fi
+      state="$(get_linger_state)"
+      if [ "$state" != "yes" ]; then
+        die "已执行启用命令，但 Linger 仍不是 yes。请手动检查: loginctl show-user $USER -p Linger"
+      fi
+      info "linger 已启用。"
+      return
+    fi
+  fi
+
+  die "请先启用 linger 后重试：sudo loginctl enable-linger $USER"
+}
+
 check_install_environment() {
   require_cmd "npm" "请安装 npm（通常随 Node.js 一起安装），并确保 'npm -v' 可用。"
   require_cmd "tmux" "请先安装 tmux，并确保 'tmux -V' 可用。"
@@ -153,8 +201,10 @@ check_install_environment() {
     require_cmd "launchctl" "请在 macOS 上运行此脚本。"
     ensure_writable_dir "$(dirname "$PLIST_PATH")" "请检查 LaunchAgents 目录权限。"
   else
+    require_cmd "loginctl" "请安装/启用 systemd 登录管理（loginctl）。"
     require_cmd "systemctl" "请安装/启用 systemd。"
     ensure_writable_dir "$UNIT_DIR" "请检查 systemd user unit 目录权限。"
+    ensure_linger_enabled
     if ! systemctl --user show-environment >/dev/null 2>&1; then
       die "systemctl --user 不可用。请先登录图形会话，或启用 linger（例如: loginctl enable-linger $USER）。"
     fi
@@ -168,7 +218,9 @@ check_runtime_environment() {
   ensure_writable_dir "$LOG_DIR" "请检查日志目录权限。"
 
   if [ "$PLATFORM" = "linux" ]; then
+    require_cmd "loginctl" "请安装/启用 systemd 登录管理（loginctl）。"
     require_cmd "systemctl" "请安装/启用 systemd。"
+    ensure_linger_enabled
     if ! systemctl --user show-environment >/dev/null 2>&1; then
       die "systemctl --user 不可用。请先登录图形会话，或启用 linger（例如: loginctl enable-linger $USER）。"
     fi
