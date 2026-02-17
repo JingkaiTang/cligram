@@ -28,8 +28,12 @@ export async function ensureSocketDir(): Promise<void> {
   }
 }
 
-export async function createSession(name: string): Promise<void> {
+export async function createSession(name: string, cwd?: string): Promise<void> {
   await ensureSocketDir();
+  if (cwd) {
+    await tmux("new-session", "-d", "-s", name, "-n", "shell", "-c", cwd);
+    return;
+  }
   await tmux("new-session", "-d", "-s", name, "-n", "shell");
 }
 

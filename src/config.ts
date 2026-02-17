@@ -28,6 +28,8 @@ export interface CligramConfig {
   pairedUsers: number[];
   outputMode: OutputMode;
   outputModeByChat: Record<string, OutputMode>;
+  /** 新建 tmux 会话的起始目录，空字符串表示使用用户 HOME */
+  sessionStartDir: string;
   /** 命令安全档位：off/whitelist/blacklist */
   commandSafetyMode: CommandSafetyMode;
   /** whitelist 模式下允许的命令名（首 token） */
@@ -79,6 +81,7 @@ let config: CligramConfig = {
   pairedUsers: [],
   outputMode: "text",
   outputModeByChat: {},
+  sessionStartDir: "",
   commandSafetyMode: "off",
   commandAllowlist: [],
   commandBlocklist: [],
@@ -113,6 +116,10 @@ export function getTmuxSocketDir(): string {
 
 export function getCligramHome(): string {
   return cligramHome;
+}
+
+export function getSessionStartDir(): string {
+  return config.sessionStartDir || os.homedir();
 }
 
 // ── 配置文件读写 ─────────────────────────────────────
@@ -261,6 +268,7 @@ export async function loadConfig(): Promise<CligramConfig> {
     outputMode:
       parsed.outputMode === "image" ? "image" : "text",
     outputModeByChat: parseOutputModeByChat(parsed.outputModeByChat),
+    sessionStartDir: typeof parsed.sessionStartDir === "string" ? parsed.sessionStartDir.trim() : "",
     commandSafetyMode: parseCommandSafetyMode(parsed.commandSafetyMode),
     commandAllowlist: parseCommandList(parsed.commandAllowlist),
     commandBlocklist: parseCommandList(parsed.commandBlocklist),

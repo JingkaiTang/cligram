@@ -1,4 +1,4 @@
-import { SESSION_PREFIX } from "./config.js";
+import { SESSION_PREFIX, getSessionStartDir } from "./config.js";
 import * as tmux from "./tmux.js";
 
 /** chatId → 手动绑定的 tmux session 名称 */
@@ -29,7 +29,7 @@ export async function ensureSession(chatId: number): Promise<string> {
   const name = sessionName(chatId);
   const exists = await tmuxApi.sessionExists(name);
   if (!exists) {
-    await tmuxApi.createSession(name);
+    await tmuxApi.createSession(name, getSessionStartDir());
   }
   return target(chatId);
 }
@@ -39,7 +39,7 @@ export async function resetSession(chatId: number): Promise<string> {
   chatSessionMap.delete(chatId);
   const name = sessionName(chatId);
   await tmuxApi.killSession(name);
-  await tmuxApi.createSession(name);
+  await tmuxApi.createSession(name, getSessionStartDir());
   return target(chatId);
 }
 

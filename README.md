@@ -75,6 +75,7 @@ cp config.example.json ~/.cligram/config.json
   "pairedUsers": [],
   "outputMode": "text",
   "outputModeByChat": {},
+  "sessionStartDir": "",
   "commandSafetyMode": "off",
   "commandAllowlist": [],
   "commandBlocklist": [],
@@ -227,6 +228,7 @@ tmux new -s work
   "pairedUsers": [],
   "outputMode": "text",
   "outputModeByChat": {},
+  "sessionStartDir": "",
   "commandSafetyMode": "off",
   "commandAllowlist": [],
   "commandBlocklist": [],
@@ -252,6 +254,7 @@ tmux new -s work
 | `pairedUsers` | number[] | `[]` | 已配对的用户 ID 列表（自动维护） |
 | `outputMode` | string | `"text"` | 输出模式：`text` 或 `image` |
 | `outputModeByChat` | object | `{}` | 按 chatId 保存的输出模式；未命中时回退到 `outputMode` |
+| `sessionStartDir` | string | `""` | 新建 tmux 会话起始目录；空值表示用户 HOME |
 | `commandSafetyMode` | string | `"off"` | 命令安全档位：`off`/`whitelist`/`blacklist` |
 | `commandAllowlist` | string[] | `[]` | `whitelist` 模式下允许执行的命令名（首 token） |
 | `commandBlocklist` | string[] | `[]` | `blacklist` 模式下禁止执行的命令名（首 token） |
@@ -268,6 +271,11 @@ tmux new -s work
 
 - `""` — 使用系统默认 tmux socket，cligram 与 iTerm2 等终端共享所有 session
 - 填写路径 — 使用独立 socket，cligram 的 session 与其他终端隔离
+
+### sessionStartDir
+
+- `""`（默认）— 新建会话从用户 HOME 目录启动
+- 填写绝对路径 — 新建会话从指定目录启动
 
 ### terminal
 

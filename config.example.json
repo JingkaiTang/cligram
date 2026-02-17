@@ -3,6 +3,7 @@
   "pairedUsers": [],
   "outputMode": "text",
   "outputModeByChat": {},
+  "sessionStartDir": "",
   "commandSafetyMode": "off",
   "commandAllowlist": [],
   "commandBlocklist": [],
