@@ -56,6 +56,10 @@ test("target-ref: rejects ambiguous and invalid refs", () => {
     name: "TerminalTargetError",
     message: /cmux target/,
   });
+  assert.throws(() => parseTargetRef("tmux:work:0.0"), {
+    name: "TerminalTargetError",
+    message: /tmux target|session/,
+  });
 });
 
 test("target-ref: formats refs from target-like objects", () => {

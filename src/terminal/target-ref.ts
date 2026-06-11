@@ -67,7 +67,7 @@ export function parseAttachRef(value: string): AttachRef {
 }
 
 function parseTmuxTarget(body: string): TmuxTarget {
-  if (!body || body.includes("/")) {
+  if (!body || body.includes("/") || body.includes(":")) {
     throw new TerminalTargetError("tmux target 格式应为 tmux:<session>");
   }
 
