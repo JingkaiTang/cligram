@@ -34,7 +34,7 @@ export async function getAvailableBackends(): Promise<TerminalBackend[]> {
   return availableBackends;
 }
 
-export async function getDefaultTarget(chatId: number): Promise<TerminalTarget> {
+export async function getDefaultBackend(): Promise<TerminalBackend> {
   for (const kind of defaultBackendPriority) {
     const backend = backends.get(kind);
     if (!backend) {
@@ -42,13 +42,17 @@ export async function getDefaultTarget(chatId: number): Promise<TerminalTarget> 
     }
 
     if (await isBackendAvailable(backend)) {
-      return backend.defaultTarget(chatId);
+      return backend;
     }
   }
 
   throw new TerminalTargetError(
     "未找到可用终端后端，请安装 tmux 或启动 cmux 后重试。",
   );
+}
+
+export async function getDefaultTarget(chatId: number): Promise<TerminalTarget> {
+  return (await getDefaultBackend()).defaultTarget(chatId);
 }
 
 export async function listAllTargets(): Promise<TerminalTarget[]> {

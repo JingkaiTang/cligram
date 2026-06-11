@@ -1,9 +1,10 @@
 import { SESSION_PREFIX } from "./config.js";
 import {
   getBackendForTarget,
+  getDefaultBackend,
   getDefaultTarget,
 } from "./terminal/registry.js";
-import { type TerminalTarget } from "./terminal/types.js";
+import { TerminalTargetError, type TerminalTarget } from "./terminal/types.js";
 
 /** chatId -> 手动绑定的终端目标 */
 const chatTargetMap = new Map<number, TerminalTarget>();
@@ -44,9 +45,17 @@ export async function ensureTarget(chatId: number): Promise<TerminalTarget> {
 
 export async function resetTarget(chatId: number): Promise<TerminalTarget> {
   const current = chatTargetMap.get(chatId);
-  const backend = current
-    ? getBackendForTarget(current)
-    : getBackendForTarget(await getDefaultTarget(chatId));
+  if (current) {
+    const backend = getBackendForTarget(current);
+    if (await backend.targetExists(current)) {
+      const target = await backend.createTarget(chatId);
+      chatTargetMap.set(chatId, target);
+      return target;
+    }
+    chatTargetMap.delete(chatId);
+  }
+
+  const backend = await getDefaultBackend();
   const target = await backend.createTarget(chatId);
   chatTargetMap.set(chatId, target);
   return target;
@@ -84,7 +93,14 @@ export async function resetSession(chatId: number): Promise<string> {
 
 /** 将 chatId 绑定到指定的已有 tmux session */
 export async function attachSession(chatId: number, sessionName: string): Promise<boolean> {
-  return attachTarget(chatId, tmuxTarget(sessionName));
+  try {
+    return await attachTarget(chatId, tmuxTarget(sessionName));
+  } catch (err) {
+    if (err instanceof TerminalTargetError) {
+      return false;
+    }
+    throw err;
+  }
 }
 
 /** 获取当前 chatId 绑定的 session 名称，未绑定或非 tmux 返回 null */

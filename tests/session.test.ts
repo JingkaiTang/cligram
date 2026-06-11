@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   __resetSessionStateForTests,
+  attachSession,
   attachTarget,
   detachSession,
   ensureTarget,
@@ -44,6 +45,7 @@ function fakeBackend(
   state: {
     defaultTarget: TerminalTarget;
     created?: TerminalTarget[];
+    defaultCalls?: number;
     exists?: Set<string>;
   },
 ): TerminalBackend {
@@ -53,6 +55,7 @@ function fakeBackend(
       return { available: true };
     },
     async defaultTarget() {
+      state.defaultCalls = (state.defaultCalls ?? 0) + 1;
       return state.defaultTarget;
     },
     async createTarget() {
@@ -136,6 +139,22 @@ test("session: resetTarget creates target on current/default backend and binds c
   assert.deepEqual(await ensureTarget(42), target);
 });
 
+test("session: resetTarget without binding does not call defaultTarget", async () => {
+  const state = {
+    defaultTarget: tmuxTarget("cg-42"),
+    created: [] as TerminalTarget[],
+    defaultCalls: 0,
+  };
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(fakeBackend("tmux", state));
+
+  const target = await resetTarget(42);
+
+  assert.equal(state.defaultCalls, 0);
+  assert.deepEqual(state.created, [target]);
+  assert.deepEqual(getCurrentTarget(42), target);
+});
+
 test("session: resetTarget creates target on currently bound backend", async () => {
   const defaultTarget = tmuxTarget("cg-42");
   const attached = cmuxTarget("surface-3");
@@ -150,6 +169,14 @@ test("session: resetTarget creates target on currently bound backend", async () 
   assert.equal(target.backend, "cmux");
   assert.deepEqual(created, [target]);
   assert.deepEqual(getCurrentTarget(42), target);
+});
+
+test("session: attachSession returns false when tmux backend is not registered", async () => {
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(fakeBackend("cmux", { defaultTarget: cmuxTarget("surface-4") }));
+
+  assert.equal(await attachSession(42, "work"), false);
+  assert.equal(getCurrentTarget(42), null);
 });
 
 test("session: ensureTarget clears missing binding and falls back to default target", async () => {

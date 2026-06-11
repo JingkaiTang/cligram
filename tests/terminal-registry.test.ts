@@ -5,6 +5,7 @@ import {
   getAvailableBackends,
   getBackend,
   getBackendForTarget,
+  getDefaultBackend,
   getDefaultTarget,
   listAllTargets,
   registerTerminalBackend,
@@ -126,6 +127,35 @@ test("terminal registry: default target prefers tmux then falls back to cmux", a
   registerTerminalBackend(backend("cmux", { defaultTarget: cmuxTarget("cmux-default") }));
 
   assert.deepEqual(await getDefaultTarget(1001), cmuxTarget("cmux-default"));
+});
+
+test("terminal registry: default backend prefers tmux then falls back to cmux without creating targets", async () => {
+  __resetTerminalBackendsForTests();
+  const cmux = backend("cmux");
+  const tmux = backend("tmux");
+  registerTerminalBackend(cmux);
+  registerTerminalBackend(tmux);
+
+  assert.equal(await getDefaultBackend(), tmux);
+
+  __resetTerminalBackendsForTests();
+  const unavailableTmux = backend("tmux", { available: false });
+  const availableCmux = backend("cmux");
+  registerTerminalBackend(unavailableTmux);
+  registerTerminalBackend(availableCmux);
+
+  assert.equal(await getDefaultBackend(), availableCmux);
+});
+
+test("terminal registry: default backend reports a readable error when no backend is available", async () => {
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(backend("tmux", { available: false }));
+  registerTerminalBackend(backend("cmux", { available: false }));
+
+  await assert.rejects(() => getDefaultBackend(), {
+    name: "TerminalTargetError",
+    message: /未找到可用终端后端.*安装 tmux.*启动 cmux/s,
+  });
 });
 
 test("terminal registry: default target reports a readable error when no backend is available", async () => {

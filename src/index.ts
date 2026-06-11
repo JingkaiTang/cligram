@@ -5,9 +5,21 @@ import {
   migrateLegacyPairedUsers,
 } from "./auth.js";
 import { registerCommands } from "./commands.js";
+import { createCmuxBackend } from "./terminal/cmux-backend.js";
+import { getAvailableBackends, registerTerminalBackend } from "./terminal/registry.js";
+import { createTmuxBackend } from "./terminal/tmux-backend.js";
 
 async function main(): Promise<void> {
   await loadConfig();
+
+  registerTerminalBackend(createTmuxBackend());
+  registerTerminalBackend(createCmuxBackend());
+  const availableBackends = await getAvailableBackends();
+  if (availableBackends.length === 0) {
+    console.error("未找到可用终端后端，请安装 tmux 或启动 cmux 后重试。");
+    process.exit(1);
+  }
+  console.log(`可用终端后端: ${availableBackends.map((backend) => backend.kind).join(", ")}`);
 
   loadPairedUsersFromConfig();
   await migrateLegacyPairedUsers();
