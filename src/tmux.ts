@@ -21,6 +21,10 @@ function tmux(...args: string[]): Promise<{ stdout: string; stderr: string }> {
   return execFile("tmux", args);
 }
 
+export function runTmux(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return tmux(...args);
+}
+
 export async function ensureSocketDir(): Promise<void> {
   const dir = getTmuxSocketDir();
   if (dir) {
