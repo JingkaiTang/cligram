@@ -42,6 +42,8 @@ function backend(
   options: {
     available?: boolean;
     defaultTarget?: TerminalTarget;
+    isAvailableError?: Error;
+    listTargetsError?: Error;
     targets?: TerminalTarget[];
   } = {},
 ): TerminalBackend {
@@ -54,6 +56,9 @@ function backend(
   return {
     kind,
     async isAvailable() {
+      if (options.isAvailableError) {
+        throw options.isAvailableError;
+      }
       return availability;
     },
     async defaultTarget() {
@@ -66,6 +71,9 @@ function backend(
       return true;
     },
     async listTargets() {
+      if (options.listTargetsError) {
+        throw options.listTargetsError;
+      }
       return options.targets ?? [];
     },
     async sendText() {},
@@ -91,6 +99,17 @@ test("terminal registry: returns only available backends", async () => {
 
   registerTerminalBackend(tmux);
   registerTerminalBackend(cmux);
+
+  assert.deepEqual(await getAvailableBackends(), [tmux]);
+});
+
+test("terminal registry: skips backends whose availability check throws", async () => {
+  __resetTerminalBackendsForTests();
+  const tmux = backend("tmux", { available: true });
+  const cmux = backend("cmux", { isAvailableError: new Error("cmux socket failed") });
+
+  registerTerminalBackend(cmux);
+  registerTerminalBackend(tmux);
 
   assert.deepEqual(await getAvailableBackends(), [tmux]);
 });
@@ -167,4 +186,21 @@ test("terminal registry: skips unavailable backends when listing targets", async
   );
 
   assert.deepEqual(await listAllTargets(), [cmuxTarget("visible")]);
+});
+
+test("terminal registry: skips backends whose target listing throws", async () => {
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(
+    backend("tmux", {
+      targets: [tmuxTarget("visible")],
+    }),
+  );
+  registerTerminalBackend(
+    backend("cmux", {
+      listTargetsError: new Error("cmux list failed"),
+      targets: [cmuxTarget("hidden")],
+    }),
+  );
+
+  assert.deepEqual(await listAllTargets(), [tmuxTarget("visible")]);
 });

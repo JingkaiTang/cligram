@@ -27,8 +27,7 @@ export function getBackendForTarget(target: TerminalTarget): TerminalBackend {
 export async function getAvailableBackends(): Promise<TerminalBackend[]> {
   const availableBackends: TerminalBackend[] = [];
   for (const backend of backends.values()) {
-    const availability = await backend.isAvailable();
-    if (availability.available) {
+    if (await isBackendAvailable(backend)) {
       availableBackends.push(backend);
     }
   }
@@ -42,8 +41,7 @@ export async function getDefaultTarget(chatId: number): Promise<TerminalTarget> 
       continue;
     }
 
-    const availability = await backend.isAvailable();
-    if (availability.available) {
+    if (await isBackendAvailable(backend)) {
       return backend.defaultTarget(chatId);
     }
   }
@@ -55,12 +53,29 @@ export async function getDefaultTarget(chatId: number): Promise<TerminalTarget> 
 
 export async function listAllTargets(): Promise<TerminalTarget[]> {
   const targets: TerminalTarget[] = [];
-  for (const backend of await getAvailableBackends()) {
-    targets.push(...(await backend.listTargets()));
+  for (const backend of backends.values()) {
+    if (!(await isBackendAvailable(backend))) {
+      continue;
+    }
+
+    try {
+      targets.push(...(await backend.listTargets()));
+    } catch {
+      continue;
+    }
   }
   return targets;
 }
 
 export function __resetTerminalBackendsForTests(): void {
   backends.clear();
+}
+
+async function isBackendAvailable(backend: TerminalBackend): Promise<boolean> {
+  try {
+    const availability = await backend.isAvailable();
+    return availability.available;
+  } catch {
+    return false;
+  }
 }
