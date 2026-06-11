@@ -4,8 +4,8 @@ import {
   formatTargetRef,
   parseAttachRef,
   parseTargetRef,
-} from "../src/terminal/target-ref.ts";
-import { TerminalTargetError } from "../src/terminal/types.ts";
+} from "../src/terminal/target-ref.js";
+import { TerminalTargetError } from "../src/terminal/types.js";
 
 test("target-ref: parses tmux session refs", () => {
   assert.deepEqual(parseTargetRef("tmux:work"), {
