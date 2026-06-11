@@ -18,7 +18,7 @@
 - Create `src/terminal/tmux-backend.ts`: adapter over existing tmux operations.
 - Create `src/terminal/cmux-backend.ts`: cmux CLI adapter with key translation and error normalization.
 - Modify `src/tmux.ts`: export a small additional command-builder hook if needed, but keep behavior compatible.
-- Modify `src/config.ts`: add `cmuxPath` config, add `targets` to built-in command names, keep `tmuxSocket` unchanged.
+- Modify `src/config.ts`: add `cmuxPath` config, keep `tmuxSocket` unchanged. Add `targets` to built-in command names in Task 8 when the `/targets` command is registered.
 - Modify `src/session.ts`: replace string tmux targets with `TerminalTarget` bindings.
 - Modify `src/output.ts`: accept `TerminalTarget` and route capture/signature through the registry backend.
 - Modify `src/commands.ts`: replace direct tmux calls with terminal backend calls and add `/targets`.
@@ -850,12 +850,6 @@ Add the default:
 cmuxPath: "",
 ```
 
-Add `targets` to `BUILTIN_COMMANDS`:
-
-```ts
-"sessions", "targets", "attach", "detach", "open",
-```
-
 Add parsing in `loadConfig()`:
 
 ```ts
@@ -1585,6 +1579,7 @@ git commit -m "feat: route output through terminal backends"
 
 **Files:**
 - Modify: `src/commands.ts`
+- Modify: `src/config.ts`
 - Modify: `src/index.ts`
 - Test: `tests/commands.test.ts`
 
@@ -1633,6 +1628,12 @@ npm test -- tests/commands.test.ts
 Expected: FAIL because `formatTargetList` does not exist.
 
 - [ ] **Step 3: Update imports and helpers**
+
+Modify `src/config.ts` and add `targets` to `BUILTIN_COMMANDS` at the same time that `/targets` is registered:
+
+```ts
+"sessions", "targets", "attach", "detach", "open",
+```
 
 Modify `src/commands.ts` imports:
 
