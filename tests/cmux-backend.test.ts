@@ -52,6 +52,44 @@ function cmuxTarget(): CmuxTarget {
   };
 }
 
+function cmuxTargetWithLabel(label: string, workspace = "workspace:1", surface = "surface:2"): CmuxTarget {
+  return {
+    backend: "cmux",
+    id: `${workspace}/${surface}`,
+    label,
+    ref: `cmux:${workspace}/${surface}`,
+    cmuxWorkspace: workspace,
+    cmuxSurface: surface,
+  };
+}
+
+function treeForWorkspace(title: string, workspace = "workspace:1", surface = "surface:2"): string {
+  return JSON.stringify({
+    windows: [
+      {
+        workspaces: [
+          {
+            ref: workspace,
+            title,
+            panes: [
+              {
+                ref: "pane:1",
+                surfaces: [
+                  {
+                    ref: surface,
+                    type: "terminal",
+                    title: "Shell",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+}
+
 function fakeDeps(options: {
   treeOutput?: string;
   reject?: Error;
@@ -159,6 +197,74 @@ test("cmux backend: parses terminal surfaces from cmux tree json", async () => {
   const backend = createCmuxBackend(deps);
 
   assert.deepEqual(await backend.listTargets(), [cmuxTarget()]);
+});
+
+test("cmux backend: does not treat panes or containers as workspaces", () => {
+  const tree = JSON.stringify({
+    windows: [
+      {
+        workspaces: [
+          {
+            ref: "workspace:1",
+            title: "Main",
+            panes: [
+              {
+                id: "pane-uuid",
+                ref: "pane:1",
+                surfaces: [
+                  {
+                    ref: "surface:2",
+                    type: "terminal",
+                    title: "Shell",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(parseCmuxTree(tree), [cmuxTarget()]);
+});
+
+test("cmux backend: defaultTarget matches cg workspace labels exactly", async () => {
+  let treeOutput = treeForWorkspace("cg-123");
+  const calls: CmuxCall[] = [];
+  const backend = createCmuxBackend({
+    async run(command, args) {
+      calls.push({ command, args });
+      if (args[0] === "tree") {
+        return { stdout: treeOutput, stderr: "" };
+      }
+      if (args[0] === "new-workspace") {
+        treeOutput = treeForWorkspace("cg-12", "workspace:12");
+      }
+      return { stdout: "", stderr: "" };
+    },
+    getCmuxPath() {
+      return "/opt/cmux";
+    },
+    getStartDir() {
+      return "/tmp/cligram";
+    },
+  });
+
+  assert.deepEqual(await backend.defaultTarget(12), cmuxTargetWithLabel("cg-12 / Shell", "workspace:12"));
+  assert.deepEqual(calls.map((call) => call.args[0]), ["tree", "new-workspace", "tree"]);
+  assert.deepEqual(calls[1], {
+    command: "/opt/cmux",
+    args: ["new-workspace", "--name", "cg-12", "--cwd", "/tmp/cligram", "--focus", "false"],
+  });
+});
+
+test("cmux backend: defaultTarget reuses exact cg workspace label", async () => {
+  const { calls, deps } = fakeDeps({ treeOutput: treeForWorkspace("cg-12") });
+  const backend = createCmuxBackend(deps);
+
+  assert.deepEqual(await backend.defaultTarget(12), cmuxTargetWithLabel("cg-12 / Shell"));
+  assert.deepEqual(calls.map((call) => call.args[0]), ["tree"]);
 });
 
 test("cmux backend: isAvailable reports broken socket as socket unavailable", async () => {

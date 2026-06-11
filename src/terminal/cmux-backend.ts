@@ -66,7 +66,7 @@ export function createCmuxBackend(deps: CmuxBackendDeps = {}): TerminalBackend {
     await runCmux(["new-workspace", "--name", name, "--cwd", cwd, "--focus", "false"]);
 
     const targets = await listTargets();
-    const created = targets.find((target) => targetIncludes(target, name)) ?? targets[0];
+    const created = targets.find((target) => hasWorkspaceLabel(target, name));
     if (!created) {
       throw new TerminalTargetError(`cmux 已创建 workspace，但未能从 cmux tree 中找到 ${name}`);
     }
@@ -87,7 +87,7 @@ export function createCmuxBackend(deps: CmuxBackendDeps = {}): TerminalBackend {
 
     async defaultTarget(chatId) {
       const name = defaultTargetName(chatId);
-      const existing = (await listTargets()).find((target) => targetIncludes(target, name));
+      const existing = (await listTargets()).find((target) => hasWorkspaceLabel(target, name));
       return existing ?? createTarget(chatId, { name });
     },
 
@@ -223,8 +223,8 @@ function defaultTargetName(chatId: number): string {
   return `cg-${chatId}`;
 }
 
-function targetIncludes(target: CmuxTarget, value: string): boolean {
-  return target.id.includes(value) || target.label.includes(value) || target.ref.includes(value);
+function hasWorkspaceLabel(target: CmuxTarget, name: string): boolean {
+  return target.label === name || target.label.startsWith(`${name} / `);
 }
 
 async function runCommand(command: string, args: string[]): Promise<CmuxResult> {
@@ -273,17 +273,48 @@ class CmuxBackendError extends Error {
 }
 
 function findWorkspaces(value: unknown): Record<string, unknown>[] {
-  const records = collectRecords(value);
-  return records.filter((record) => {
-    const kind = stringValue(record, ["type", "kind"]);
-    return (
-      Array.isArray(record.workspaces) ||
-      Array.isArray(record.surfaces) ||
-      Array.isArray(record.panes) ||
-      kind === "workspace" ||
-      Boolean(stringValue(record, ["workspaceId", "workspace"]))
-    );
-  });
+  const result: Record<string, unknown>[] = [];
+  const seen = new Set<Record<string, unknown>>();
+
+  function visit(node: unknown, inWorkspacesArray: boolean): void {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        visit(item, inWorkspacesArray);
+      }
+      return;
+    }
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    const record = node as Record<string, unknown>;
+    if (isWorkspaceRecord(record, inWorkspacesArray) && !seen.has(record)) {
+      seen.add(record);
+      result.push(record);
+    }
+
+    for (const [key, child] of Object.entries(record)) {
+      if (key === "workspaces" && Array.isArray(child)) {
+        visit(child, true);
+      } else {
+        visit(child, false);
+      }
+    }
+  }
+
+  visit(value, false);
+  return result;
+}
+
+function isWorkspaceRecord(record: Record<string, unknown>, inWorkspacesArray: boolean): boolean {
+  if (inWorkspacesArray) {
+    return true;
+  }
+  const ref = stringValue(record, ["ref"]);
+  if (ref?.startsWith("workspace:")) {
+    return true;
+  }
+  return stringValue(record, ["type", "kind"]) === "workspace";
 }
 
 function findSurfaces(workspace: Record<string, unknown>): Record<string, unknown>[] {
