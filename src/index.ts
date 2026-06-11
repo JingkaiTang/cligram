@@ -4,6 +4,7 @@ import {
   loadPairedUsersFromConfig,
   migrateLegacyPairedUsers,
 } from "./auth.js";
+import { formatBotError } from "./bot-errors.js";
 import { registerCommands } from "./commands.js";
 import { createCmuxBackend } from "./terminal/cmux-backend.js";
 import { getAvailableBackends, registerTerminalBackend } from "./terminal/registry.js";
@@ -32,6 +33,14 @@ async function main(): Promise<void> {
   console.log("");
 
   const bot = new Telegraf(getConfig().botToken);
+  bot.catch(async (err, ctx) => {
+    console.error("Bot handler failed:", err);
+    try {
+      await ctx.reply(formatBotError(err));
+    } catch (replyErr) {
+      console.error("Bot error reply failed:", replyErr);
+    }
+  });
   registerCommands(bot);
 
   // 设置 Bot 命令菜单（聊天输入框的快捷指令按钮）
