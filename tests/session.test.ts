@@ -2,66 +2,165 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   __resetSessionStateForTests,
-  __setTmuxApiForTests,
-  attachSession,
+  attachTarget,
   detachSession,
-  ensureSession,
-  getCurrentSession,
-  getSessionName,
-  resetSession,
-} from "../src/session.ts";
+  ensureTarget,
+  getCurrentTarget,
+  resetTarget,
+} from "../src/session.js";
+import {
+  __resetTerminalBackendsForTests,
+  registerTerminalBackend,
+} from "../src/terminal/registry.js";
+import type {
+  BackendAvailability,
+  BackendKind,
+  TerminalBackend,
+  TerminalTarget,
+} from "../src/terminal/types.js";
 
-interface FakeTmuxState {
-  sessions: Set<string>;
-  created: string[];
-  killed: string[];
-}
-
-function createFakeTmux(state: FakeTmuxState) {
+function tmuxTarget(id: string): TerminalTarget {
   return {
-    async sessionExists(name: string): Promise<boolean> {
-      return state.sessions.has(name);
-    },
-    async createSession(name: string): Promise<void> {
-      state.created.push(name);
-      state.sessions.add(name);
-    },
-    async killSession(name: string): Promise<void> {
-      state.killed.push(name);
-      state.sessions.delete(name);
-    },
+    backend: "tmux",
+    id,
+    label: id,
+    ref: `tmux:${id}`,
+    tmuxSession: id,
   };
 }
 
-test("session: ensureSession creates default session when missing", async () => {
-  const state: FakeTmuxState = { sessions: new Set(), created: [], killed: [] };
-  __resetSessionStateForTests();
-  __setTmuxApiForTests(createFakeTmux(state));
+function cmuxTarget(id: string): TerminalTarget {
+  return {
+    backend: "cmux",
+    id,
+    label: id,
+    ref: `cmux:${id}`,
+    cmuxSurface: id,
+  };
+}
 
-  const target = await ensureSession(123);
-  assert.equal(target, "cg-123:0.0");
-  assert.deepEqual(state.created, ["cg-123"]);
+function fakeBackend(
+  kind: BackendKind,
+  state: {
+    defaultTarget: TerminalTarget;
+    created?: TerminalTarget[];
+    exists?: Set<string>;
+  },
+): TerminalBackend {
+  return {
+    kind,
+    async isAvailable(): Promise<BackendAvailability> {
+      return { available: true };
+    },
+    async defaultTarget() {
+      return state.defaultTarget;
+    },
+    async createTarget() {
+      const target =
+        kind === "tmux"
+          ? tmuxTarget(`${kind}-created-${(state.created?.length ?? 0) + 1}`)
+          : cmuxTarget(`${kind}-created-${(state.created?.length ?? 0) + 1}`);
+      state.created?.push(target);
+      state.exists?.add(target.ref);
+      return target;
+    },
+    async targetExists(target) {
+      return state.exists?.has(target.ref) ?? true;
+    },
+    async listTargets() {
+      return [];
+    },
+    async sendText() {},
+    async sendTextAndEnter() {},
+    async sendKey() {},
+    async capturePane() {
+      return "";
+    },
+    async captureVisible() {
+      return "";
+    },
+    async targetSignature(target) {
+      return target.ref;
+    },
+    async openInTerminal() {},
+  };
+}
 
+test.afterEach(() => {
   __resetSessionStateForTests();
+  __resetTerminalBackendsForTests();
 });
 
-test("session: attach/detach and reset flow", async () => {
-  const state: FakeTmuxState = { sessions: new Set(["work", "cg-9"]), created: [], killed: [] };
-  __resetSessionStateForTests();
-  __setTmuxApiForTests(createFakeTmux(state));
+test("session: ensureTarget returns registry default target", async () => {
+  const defaultTarget = tmuxTarget("cg-123");
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(fakeBackend("tmux", { defaultTarget }));
 
-  assert.equal(await attachSession(9, "work"), true);
-  assert.equal(getCurrentSession(9), "work");
-  assert.equal(await ensureSession(9), "work:0.0");
+  assert.deepEqual(await ensureTarget(123), defaultTarget);
+  assert.equal(getCurrentTarget(123), null);
+});
 
+test("session: attachTarget binds current target and ensureTarget returns it", async () => {
+  const defaultTarget = tmuxTarget("cg-9");
+  const attached = cmuxTarget("surface-1");
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(fakeBackend("tmux", { defaultTarget }));
+  registerTerminalBackend(fakeBackend("cmux", { defaultTarget: attached }));
+
+  assert.equal(await attachTarget(9, attached), true);
+  assert.deepEqual(getCurrentTarget(9), attached);
+  assert.deepEqual(await ensureTarget(9), attached);
+});
+
+test("session: detachSession clears target binding", async () => {
+  const attached = cmuxTarget("surface-2");
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(fakeBackend("cmux", { defaultTarget: attached }));
+
+  assert.equal(await attachTarget(9, attached), true);
   detachSession(9);
-  assert.equal(getCurrentSession(9), null);
-  assert.equal(getSessionName(9), "cg-9");
 
-  const target = await resetSession(9);
-  assert.equal(target, "cg-9:0.0");
-  assert.deepEqual(state.killed, ["cg-9"]);
-  assert.deepEqual(state.created, ["cg-9"]);
+  assert.equal(getCurrentTarget(9), null);
+});
 
-  __resetSessionStateForTests();
+test("session: resetTarget creates target on current/default backend and binds chat", async () => {
+  const defaultTarget = cmuxTarget("default-surface");
+  const created: TerminalTarget[] = [];
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(fakeBackend("cmux", { defaultTarget, created }));
+
+  const target = await resetTarget(42);
+
+  assert.deepEqual(created, [target]);
+  assert.deepEqual(getCurrentTarget(42), target);
+  assert.deepEqual(await ensureTarget(42), target);
+});
+
+test("session: resetTarget creates target on currently bound backend", async () => {
+  const defaultTarget = tmuxTarget("cg-42");
+  const attached = cmuxTarget("surface-3");
+  const created: TerminalTarget[] = [];
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(fakeBackend("tmux", { defaultTarget }));
+  registerTerminalBackend(fakeBackend("cmux", { defaultTarget: attached, created }));
+  await attachTarget(42, attached);
+
+  const target = await resetTarget(42);
+
+  assert.equal(target.backend, "cmux");
+  assert.deepEqual(created, [target]);
+  assert.deepEqual(getCurrentTarget(42), target);
+});
+
+test("session: ensureTarget clears missing binding and falls back to default target", async () => {
+  const defaultTarget = tmuxTarget("cg-77");
+  const attached = cmuxTarget("gone");
+  const exists = new Set<string>();
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(fakeBackend("tmux", { defaultTarget }));
+  registerTerminalBackend(fakeBackend("cmux", { defaultTarget: attached, exists }));
+  await attachTarget(77, attached);
+
+  assert.deepEqual(await ensureTarget(77), defaultTarget);
+  assert.equal(getCurrentTarget(77), null);
 });
