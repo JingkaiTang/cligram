@@ -1,8 +1,9 @@
 import type { Context } from "telegraf";
-import * as tmux from "./tmux.js";
 import { MAX_MESSAGE_LENGTH, isImageMode, getConfig } from "./config.js";
 import { renderTerminalImage } from "./render.js";
 import { logError, logWarn } from "./logger.js";
+import { getBackendForTarget } from "./terminal/registry.js";
+import type { TerminalTarget } from "./terminal/types.js";
 
 // ── 工具函数 ─────────────────────────────────────────
 
@@ -27,6 +28,23 @@ function trimOutput(raw: string): string {
 
 function resolveChatId(ctx: Context): number | undefined {
   return typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined;
+}
+
+type OutputTarget = TerminalTarget | string;
+
+function legacyTmuxTarget(target: string): TerminalTarget {
+  const sessionName = target.replace(/:\d+(?:\.\d+)?$/, "");
+  return {
+    backend: "tmux",
+    id: sessionName,
+    label: sessionName,
+    ref: `tmux:${sessionName}`,
+    tmuxSession: sessionName,
+  };
+}
+
+function normalizeTarget(target: OutputTarget): TerminalTarget {
+  return typeof target === "string" ? legacyTmuxTarget(target) : target;
 }
 
 // ── 交互提示检测 ─────────────────────────────────────
@@ -176,15 +194,27 @@ async function sendImageMessage(
 
 export async function captureAndSend(
   ctx: Context,
+  target: TerminalTarget,
+  delayMs?: number,
+): Promise<void>;
+export async function captureAndSend(
+  ctx: Context,
   target: string,
+  delayMs?: number,
+): Promise<void>;
+export async function captureAndSend(
+  ctx: Context,
+  target: OutputTarget,
   delayMs?: number,
 ): Promise<void> {
   await sleep(delayMs ?? getConfig().outputDelayMs);
+  const terminalTarget = normalizeTarget(target);
+  const backend = getBackendForTarget(terminalTarget);
   const chatId = resolveChatId(ctx);
 
   // 图片模式：只截取可见屏幕，避免图片过长
   if (isImageMode(chatId)) {
-    const raw = await tmux.captureVisible(target);
+    const raw = await backend.captureVisible(terminalTarget);
     const output = trimOutput(raw);
     if (!output) return;
     const ok = await replyWithImage(ctx, output);
@@ -192,7 +222,7 @@ export async function captureAndSend(
     // 渲染失败，回退到文本模式（下面重新用完整历史截取）
   }
 
-  const raw = await tmux.capturePane(target);
+  const raw = await backend.capturePane(terminalTarget);
   const output = trimOutput(raw);
 
   if (!output) {
@@ -216,13 +246,25 @@ export async function captureAndSend(
 
 export async function sendScreen(
   ctx: Context,
+  target: TerminalTarget,
+  pages?: number,
+): Promise<void>;
+export async function sendScreen(
+  ctx: Context,
   target: string,
+  pages?: number,
+): Promise<void>;
+export async function sendScreen(
+  ctx: Context,
+  target: OutputTarget,
   pages: number = 1,
 ): Promise<void> {
   const linesPerPage = getConfig().screenLines;
   const captureLines = linesPerPage * pages;
+  const terminalTarget = normalizeTarget(target);
+  const backend = getBackendForTarget(terminalTarget);
 
-  const raw = await tmux.capturePane(target, captureLines);
+  const raw = await backend.capturePane(terminalTarget, captureLines);
   const output = trimOutput(raw);
   const chatId = resolveChatId(ctx);
 
@@ -276,7 +318,7 @@ export async function sendScreen(
 
 export class ScreenMonitor {
   private chatId: number;
-  private target: string;
+  private target: TerminalTarget;
   private ctx: Context;
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastContent: string = "";
@@ -284,26 +326,31 @@ export class ScreenMonitor {
   private lastChangeAt: number = 0;
   private onStop: (chatId: number) => void;
 
-  constructor(chatId: number, target: string, ctx: Context, onStop: (chatId: number) => void) {
+  constructor(chatId: number, target: TerminalTarget, ctx: Context, onStop: (chatId: number) => void);
+  constructor(chatId: number, target: string, ctx: Context, onStop: (chatId: number) => void);
+  constructor(chatId: number, target: OutputTarget, ctx: Context, onStop: (chatId: number) => void) {
     this.chatId = chatId;
-    this.target = target;
+    this.target = normalizeTarget(target);
     this.ctx = ctx;
     this.onStop = onStop;
   }
 
   /** 启动或重置监控 */
-  async start(target: string, ctx: Context): Promise<void> {
-    this.target = target;
+  async start(target: TerminalTarget, ctx: Context): Promise<void>;
+  async start(target: string, ctx: Context): Promise<void>;
+  async start(target: OutputTarget, ctx: Context): Promise<void> {
+    this.target = normalizeTarget(target);
     this.ctx = ctx;
     this.lastChangeAt = Date.now();
+    const backend = getBackendForTarget(this.target);
 
     // 用当前屏幕内容作为基线，避免首次 poll 误报
     // 截取方式须与 poll() 一致，否则基线不匹配会导致误报
     try {
-      this.lastSignature = await tmux.paneSignature(this.target);
+      this.lastSignature = await backend.targetSignature(this.target);
       const raw = isImageMode(this.chatId)
-        ? await tmux.captureVisible(this.target)
-        : await tmux.capturePane(this.target);
+        ? await backend.captureVisible(this.target)
+        : await backend.capturePane(this.target);
       this.lastContent = trimOutput(raw);
     } catch (err) {
       logWarn("output.monitor.start", "failed to initialize monitor baseline", {
@@ -343,8 +390,9 @@ export class ScreenMonitor {
     }
 
     let signature: string;
+    const backend = getBackendForTarget(this.target);
     try {
-      signature = await tmux.paneSignature(this.target);
+      signature = await backend.targetSignature(this.target);
     } catch (err) {
       logWarn("output.monitor.poll", "failed to read pane signature, stop monitor", {
         chatId: this.chatId,
@@ -363,8 +411,8 @@ export class ScreenMonitor {
     try {
       // 图片模式下只截取可见屏幕，文本模式截取完整历史
       raw = isImageMode(this.chatId)
-        ? await tmux.captureVisible(this.target)
-        : await tmux.capturePane(this.target);
+        ? await backend.captureVisible(this.target)
+        : await backend.capturePane(this.target);
     } catch (err) {
       // tmux 会话可能已关闭
       logWarn("output.monitor.poll", "failed to capture pane, stop monitor", {
@@ -420,12 +468,23 @@ const monitors = new Map<number, ScreenMonitor>();
 
 export function getOrCreateMonitor(
   chatId: number,
+  target: TerminalTarget,
+  ctx: Context,
+): ScreenMonitor;
+export function getOrCreateMonitor(
+  chatId: number,
   target: string,
+  ctx: Context,
+): ScreenMonitor;
+export function getOrCreateMonitor(
+  chatId: number,
+  target: OutputTarget,
   ctx: Context,
 ): ScreenMonitor {
   let monitor = monitors.get(chatId);
   if (!monitor) {
-    const created = new ScreenMonitor(chatId, target, ctx, (stoppedChatId) => {
+    const terminalTarget = normalizeTarget(target);
+    const created = new ScreenMonitor(chatId, terminalTarget, ctx, (stoppedChatId) => {
       const current = monitors.get(stoppedChatId);
       if (current === created) {
         monitors.delete(stoppedChatId);
