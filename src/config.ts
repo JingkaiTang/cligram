@@ -48,6 +48,8 @@ export interface CligramConfig {
   customCommands: Record<string, CustomCommand>;
   /** tmux socket 路径，空字符串表示使用系统默认 socket */
   tmuxSocket: string;
+  /** cmux CLI 路径，空字符串表示自动探测 */
+  cmuxPath: string;
   /** 终端程序配置，用于 /open 指令。预设值: "iterm2"、"terminal"，或自定义命令 */
   terminal: string;
   /** 图片模式渲染字体配置 */
@@ -91,6 +93,7 @@ let config: CligramConfig = {
   screenLines: DEFAULT_SCREEN_LINES,
   customCommands: {},
   tmuxSocket: "",
+  cmuxPath: "",
   terminal: "",
   font: { ...DEFAULT_FONT },
 };
@@ -153,7 +156,7 @@ const BUILTIN_COMMANDS = new Set([
   "start", "pair", "unpair", "help", "screen", "mode", "new",
   "exec", "cd", "ls", "pwd", "enter", "up", "down", "left",
   "right", "esc", "ctrl", "alt", "shift", "cmd",
-  "sessions", "attach", "detach", "open",
+  "sessions", "targets", "attach", "detach", "open",
 ]);
 const TELEGRAM_COMMAND_RE = /^[a-z0-9_]{1,32}$/;
 
@@ -278,6 +281,7 @@ export async function loadConfig(): Promise<CligramConfig> {
     screenLines: positiveInt(parsed.screenLines, DEFAULT_SCREEN_LINES),
     customCommands: parseCustomCommands(parsed.customCommands),
     tmuxSocket: typeof parsed.tmuxSocket === "string" ? parsed.tmuxSocket : "",
+    cmuxPath: typeof parsed.cmuxPath === "string" ? parsed.cmuxPath.trim() : "",
     terminal: typeof parsed.terminal === "string" ? parsed.terminal : "",
     font: parseFont(parsed.font),
   };

@@ -14,11 +14,13 @@ test("config: parses custom commands and safety settings", async () => {
   const configPath = await createTempConfig({
     commandSafetyMode: "whitelist",
     commandAllowlist: ["ls", "git", "LS", " "],
+    cmuxPath: "/Applications/cmux.app/Contents/MacOS/cmux",
     customCommands: {
       "good_cmd": { command: "echo ok", description: "ok" },
       "bad-name": { command: "echo bad", description: "bad" },
       "Start": { command: "echo bad", description: "bad" },
       "start": { command: "echo bad", description: "bad" },
+      "targets": { command: "echo bad", description: "bad" },
     },
   });
 
@@ -29,6 +31,7 @@ test("config: parses custom commands and safety settings", async () => {
   const cfg = getConfig();
   assert.equal(cfg.commandSafetyMode, "whitelist");
   assert.deepEqual(cfg.commandAllowlist, ["ls", "git"]);
+  assert.equal(cfg.cmuxPath, "/Applications/cmux.app/Contents/MacOS/cmux");
   assert.deepEqual(Object.keys(cfg.customCommands), ["good_cmd"]);
 
   assert.equal(isCommandAllowed("ls -al").allowed, true);

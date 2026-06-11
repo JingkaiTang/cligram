@@ -12,6 +12,7 @@
   "idleTimeoutMs": 30000,
   "screenLines": 50,
   "tmuxSocket": "",
+  "cmuxPath": "",
   "terminal": "iterm2",
   "font": {
     "family": "Menlo, 'SF Mono', Consolas, 'DejaVu Sans Mono', 'PingFang SC', 'Noto Sans CJK SC', monospace",
