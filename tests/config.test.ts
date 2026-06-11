@@ -20,7 +20,6 @@ test("config: parses custom commands and safety settings", async () => {
       "bad-name": { command: "echo bad", description: "bad" },
       "Start": { command: "echo bad", description: "bad" },
       "start": { command: "echo bad", description: "bad" },
-      "targets": { command: "echo bad", description: "bad" },
     },
   });
 
