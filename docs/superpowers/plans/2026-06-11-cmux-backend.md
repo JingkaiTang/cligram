@@ -1260,7 +1260,12 @@ git commit -m "feat: add cmux terminal backend"
 
 **Files:**
 - Modify: `src/session.ts`
+- Modify: `src/terminal/registry.ts`
+- Modify: `src/index.ts`
+- Create: `src/bot-errors.ts`
 - Test: `tests/session.test.ts`
+- Test: `tests/terminal-registry.test.ts`
+- Test: `tests/bot-errors.test.ts`
 
 - [ ] **Step 1: Rewrite session tests for TerminalTarget**
 
@@ -1377,10 +1382,10 @@ Expected: FAIL because `ensureTarget`, `attachTarget`, and `resetTarget` do not 
 
 - [ ] **Step 3: Replace session implementation**
 
-Modify `src/session.ts` to expose backend-neutral functions while keeping compatibility wrappers for callers not yet migrated:
+Modify `src/session.ts` to expose backend-neutral functions while keeping compatibility wrappers for callers not yet migrated. `resetTarget()` must select a backend without calling `getDefaultTarget()` when no target is bound, because `getDefaultTarget()` creates missing targets as a side effect:
 
 ```ts
-import { getBackendForTarget, getDefaultTarget } from "./terminal/registry.js";
+import { getBackendForTarget, getDefaultBackend, getDefaultTarget } from "./terminal/registry.js";
 import type { TerminalTarget } from "./terminal/types.js";
 
 const chatTargetMap = new Map<number, TerminalTarget>();
@@ -1396,8 +1401,8 @@ export async function ensureTarget(chatId: number): Promise<TerminalTarget> {
 }
 
 export async function resetTarget(chatId: number): Promise<TerminalTarget> {
-  const current = chatTargetMap.get(chatId) ?? await getDefaultTarget(chatId);
-  const backend = getBackendForTarget(current);
+  const current = chatTargetMap.get(chatId);
+  const backend = current ? getBackendForTarget(current) : await getDefaultBackend();
   const created = await backend.createTarget(chatId);
   chatTargetMap.set(chatId, created);
   return created;
@@ -1422,6 +1427,8 @@ export function __resetSessionStateForTests(): void {
   chatTargetMap.clear();
 }
 ```
+
+Also update `src/terminal/registry.ts` with `getDefaultBackend()`, using the same tmux-first, cmux-fallback availability order as `getDefaultTarget()` but without creating any target. Update `src/index.ts` to register `createTmuxBackend()` and `createCmuxBackend()` after `loadConfig()`, validate that at least one backend is available, and log the available backend list. Add `src/bot-errors.ts` plus `bot.catch()` in `src/index.ts` so legacy command handler errors become Telegram-visible messages until Task 8 removes the legacy path.
 
 - [ ] **Step 4: Run session tests**
 
@@ -1800,15 +1807,16 @@ git commit -m "feat: control terminal targets from commands"
 
 ---
 
-### Task 9: Backend Registration At Startup
+### Task 9: Startup Registration Verification
 
 **Files:**
 - Modify: `src/index.ts`
+- Modify: `tests/bot-errors.test.ts` or add a startup-focused test if useful
 - Test: `npm run build`
 
-- [ ] **Step 1: Add backend registration imports**
+- [ ] **Step 1: Verify startup registration already exists**
 
-Modify `src/index.ts`:
+Task 6 moved backend registration earlier to avoid a broken intermediate master. Confirm `src/index.ts` already imports and registers:
 
 ```ts
 import { createCmuxBackend } from "./terminal/cmux-backend.js";
@@ -1816,31 +1824,16 @@ import { registerTerminalBackend, getAvailableBackends } from "./terminal/regist
 import { createTmuxBackend } from "./terminal/tmux-backend.js";
 ```
 
-- [ ] **Step 2: Register and validate backends after config load**
+- [ ] **Step 2: Verify backend validation and error reply behavior**
 
-In `main()` after `await loadConfig();`:
+Confirm `main()` registers both backends after `await loadConfig();`, validates at least one backend is available, logs the list, and has `bot.catch()` wired through `formatBotError()`.
 
-```ts
-registerTerminalBackend(createTmuxBackend());
-registerTerminalBackend(createCmuxBackend());
-const availableBackends = await getAvailableBackends();
-if (availableBackends.length === 0) {
-  console.error("错误: 没有可用的终端后端。请安装 tmux，或启动 cmux 并确认 cmux CLI 可用。");
-  process.exit(1);
-}
-```
-
-Add startup log:
-
-```ts
-console.log(`  可用终端后端: ${availableBackends.map((backend) => backend.kind).join(", ")}`);
-```
-
-- [ ] **Step 3: Run build**
+- [ ] **Step 3: Run build and targeted tests**
 
 Run:
 
 ```bash
+npm test -- tests/bot-errors.test.ts tests/terminal-registry.test.ts
 npm run build
 ```
 
@@ -1849,8 +1842,8 @@ Expected: PASS.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/index.ts
-git commit -m "feat: discover terminal backends on startup"
+git add src/index.ts tests/bot-errors.test.ts tests/terminal-registry.test.ts
+git commit -m "test: verify terminal backend startup"
 ```
 
 ---
