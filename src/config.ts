@@ -156,7 +156,7 @@ const BUILTIN_COMMANDS = new Set([
   "start", "pair", "unpair", "help", "screen", "mode", "new",
   "exec", "cd", "ls", "pwd", "enter", "up", "down", "left",
   "right", "esc", "ctrl", "alt", "shift", "cmd",
-  "sessions", "attach", "detach", "open",
+  "targets", "sessions", "attach", "detach", "open",
 ]);
 const TELEGRAM_COMMAND_RE = /^[a-z0-9_]{1,32}$/;
 

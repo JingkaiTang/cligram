@@ -1,11 +1,13 @@
 import { Telegraf, Context } from "telegraf";
 import { message } from "telegraf/filters";
 import { isPaired, unpair } from "./auth.js";
-import { ensureSession, resetSession, attachSession, detachSession, getCurrentSession, getSessionName } from "./session.js";
-import * as tmux from "./tmux.js";
+import { ensureTarget, resetTarget, attachTarget, getCurrentTarget, detachSession } from "./session.js";
 import { captureAndSend, sendScreen, getOrCreateMonitor, stopMonitor } from "./output.js";
 import { getConfig, getOutputMode, setOutputMode, isCommandAllowed, type OutputMode } from "./config.js";
 import { createPairRequest } from "./pair-request.js";
+import { getBackendForTarget, listAllTargets } from "./terminal/registry.js";
+import { parseAttachRef, parseTargetRef } from "./terminal/target-ref.js";
+import { TerminalTargetError, type TerminalTarget } from "./terminal/types.js";
 
 function getAuthId(ctx: Context): number | null {
   return ctx.from?.id ?? ctx.chat?.id ?? null;
@@ -24,9 +26,39 @@ function authMiddleware(
 }
 
 /** 命令执行后启动/重置屏幕监控 */
-async function startMonitor(chatId: number, target: string, ctx: Context): Promise<void> {
+async function startMonitor(chatId: number, target: TerminalTarget, ctx: Context): Promise<void> {
   const monitor = getOrCreateMonitor(chatId, target, ctx);
   await monitor.start(target, ctx);
+}
+
+export function formatTargetList(targets: TerminalTarget[], current: TerminalTarget | null): string {
+  const lines = ["<b>终端目标列表:</b>"];
+  if (targets.length === 0) {
+    lines.push("", "当前没有可用终端目标。");
+    return lines.join("\n");
+  }
+
+  for (const backend of ["tmux", "cmux"] as const) {
+    const group = targets.filter((target) => target.backend === backend);
+    if (group.length === 0) continue;
+    lines.push("", `<b>${backend}:</b>`);
+    for (const target of group) {
+      const marker = current?.ref === target.ref ? " ← 当前绑定" : "";
+      lines.push(`• <code>${target.ref}</code> — ${target.label}${marker}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+async function replyTargets(ctx: Context): Promise<void> {
+  const chatId = ctx.chat?.id;
+  if (!chatId) {
+    await ctx.reply("无法识别当前会话，无法列出终端目标。");
+    return;
+  }
+  const targets = await listAllTargets();
+  await ctx.reply(formatTargetList(targets, getCurrentTarget(chatId)), { parse_mode: "HTML" });
 }
 
 export function registerCommands(bot: Telegraf): void {
@@ -92,7 +124,7 @@ export function registerCommands(bot: Telegraf): void {
       "/ls — 列出文件",
       "/pwd — 显示当前目录",
       "/screen [n] — 截屏（n=页数，默认1）",
-      "/new — 新建终端会话",
+      "/new — 新建终端目标",
       "/mode [text|image] — 查看/切换输出模式",
       "/enter — 输入回车键",
       "/up /down /left /right — 方向键",
@@ -104,11 +136,12 @@ export function registerCommands(bot: Telegraf): void {
       "/unpair — 取消配对",
       "/pair — 申请配对码（需在本机执行 cligram pair approve &lt;配对码&gt; 批准）",
       "",
-      "<b>会话管理:</b>",
-      "/sessions — 列出所有 tmux 会话",
-      "/attach &lt;session&gt; — 绑定到指定 tmux 会话",
-      "/detach — 解绑当前会话",
-      "/open — 在本机终端打开当前会话",
+      "<b>终端目标:</b>",
+      "/targets — 列出所有终端目标",
+      "/sessions — 兼容别名，等同 /targets",
+      "/attach &lt;target&gt; — 绑定到指定终端目标",
+      "/detach — 解绑当前终端目标",
+      "/open — 在本机终端打开当前终端目标",
     ];
 
     const custom = getConfig().customCommands;
@@ -134,7 +167,7 @@ export function registerCommands(bot: Telegraf): void {
   bot.command("screen", authMiddleware, async (ctx) => {
     const arg = ctx.message.text.replace(/^\/screen\s*/, "").trim();
     const pages = Math.max(1, Math.round(Number(arg) || 1));
-    const target = await ensureSession(ctx.chat.id);
+    const target = await ensureTarget(ctx.chat.id);
     await sendScreen(ctx, target, pages);
   });
 
@@ -163,9 +196,9 @@ export function registerCommands(bot: Telegraf): void {
   });
 
   bot.command("new", authMiddleware, async (ctx) => {
-    const target = await resetSession(ctx.chat.id);
+    const target = await resetTarget(ctx.chat.id);
     await captureAndSend(ctx, target, 200);
-    await ctx.reply("已创建新的终端会话。");
+    await ctx.reply(`已创建新的终端目标: <code>${target.ref}</code>`, { parse_mode: "HTML" });
   });
 
   bot.command("exec", authMiddleware, async (ctx) => {
@@ -177,8 +210,8 @@ export function registerCommands(bot: Telegraf): void {
     if (!guard.allowed) {
       return ctx.reply(buildCommandSafetyRejectMessage(guard.reason, guard.command));
     }
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendTextAndEnter(target, cmd);
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendTextAndEnter(target, cmd);
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
@@ -188,64 +221,64 @@ export function registerCommands(bot: Telegraf): void {
     if (!dir) {
       return ctx.reply("用法: /cd <path>");
     }
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendTextAndEnter(target, `cd ${dir}`);
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendTextAndEnter(target, `cd ${dir}`);
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
 
   bot.command("ls", authMiddleware, async (ctx) => {
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendTextAndEnter(target, "ls -alh");
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendTextAndEnter(target, "ls -alh");
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
 
   bot.command("pwd", authMiddleware, async (ctx) => {
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendTextAndEnter(target, "pwd");
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendTextAndEnter(target, "pwd");
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
 
   bot.command("enter", authMiddleware, async (ctx) => {
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendKey(target, "Enter");
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendKey(target, "Enter");
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
 
   bot.command("up", authMiddleware, async (ctx) => {
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendKey(target, "Up");
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendKey(target, "Up");
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
 
   bot.command("down", authMiddleware, async (ctx) => {
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendKey(target, "Down");
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendKey(target, "Down");
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
 
   bot.command("left", authMiddleware, async (ctx) => {
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendKey(target, "Left");
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendKey(target, "Left");
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
 
   bot.command("right", authMiddleware, async (ctx) => {
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendKey(target, "Right");
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendKey(target, "Right");
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
 
   bot.command("esc", authMiddleware, async (ctx) => {
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendKey(target, "Escape");
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendKey(target, "Escape");
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
@@ -255,8 +288,8 @@ export function registerCommands(bot: Telegraf): void {
     if (!key) {
       return ctx.reply("用法: /ctrl + <key>");
     }
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendKey(target, `C-${key}`);
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendKey(target, `C-${key}`);
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
@@ -266,8 +299,8 @@ export function registerCommands(bot: Telegraf): void {
     if (!key) {
       return ctx.reply("用法: /alt + <key>");
     }
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendKey(target, `M-${key}`);
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendKey(target, `M-${key}`);
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
@@ -277,8 +310,8 @@ export function registerCommands(bot: Telegraf): void {
     if (!key) {
       return ctx.reply("用法: /shift + <key>");
     }
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendKey(target, `S-${key}`);
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendKey(target, `S-${key}`);
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
@@ -289,48 +322,50 @@ export function registerCommands(bot: Telegraf): void {
     if (!key) {
       return ctx.reply("用法: /cmd + <key>");
     }
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendKey(target, `C-${key}`);
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendKey(target, `C-${key}`);
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
 
-  // --- 会话管理指令 ---
+  // --- 终端目标管理指令 ---
 
-  bot.command("sessions", authMiddleware, async (ctx) => {
-    const sessions = await tmux.listSessions();
-    if (sessions.length === 0) {
-      return ctx.reply("当前没有 tmux 会话。");
-    }
-    const current = getCurrentSession(ctx.chat.id);
-    const lines = sessions.map((s) => {
-      const marker = s === current ? " ← 当前绑定" : "";
-      return `• <code>${s}</code>${marker}`;
-    });
-    ctx.reply(`<b>tmux 会话列表:</b>\n${lines.join("\n")}`, { parse_mode: "HTML" });
-  });
+  bot.command("targets", authMiddleware, replyTargets);
+
+  bot.command("sessions", authMiddleware, replyTargets);
 
   bot.command("attach", authMiddleware, async (ctx) => {
-    const name = ctx.message.text.replace(/^\/attach\s*/, "").trim();
-    if (!name) {
-      return ctx.reply("用法: /attach <session>");
+    const raw = ctx.message.text.replace(/^\/attach\s*/, "").trim();
+    if (!raw) {
+      return ctx.reply("用法: /attach <tmux:session|cmux:surface|cmux:workspace/surface>");
     }
-    const ok = await attachSession(ctx.chat.id, name);
+    let target: TerminalTarget;
+    try {
+      const attachRef = parseAttachRef(raw);
+      target = attachRef.kind === "legacy-tmux"
+        ? parseTargetRef(`tmux:${attachRef.sessionName}`)
+        : attachRef.target;
+    } catch (err) {
+      if (err instanceof TerminalTargetError || err instanceof Error) {
+        return ctx.reply(err.message);
+      }
+      return ctx.reply(String(err));
+    }
+    const ok = await attachTarget(ctx.chat.id, target);
     if (!ok) {
-      return ctx.reply(`会话 "${name}" 不存在。使用 /sessions 查看可用会话。`);
+      return ctx.reply(`目标不存在: ${raw}\n使用 /targets 查看可用目标。`);
     }
-    const target = await ensureSession(ctx.chat.id);
     await captureAndSend(ctx, target, 200);
-    await ctx.reply(`已绑定到会话: <code>${name}</code>`, { parse_mode: "HTML" });
+    await ctx.reply(`已绑定到终端目标: <code>${target.ref}</code>`, { parse_mode: "HTML" });
   });
 
   bot.command("detach", authMiddleware, (ctx) => {
-    const current = getCurrentSession(ctx.chat.id);
+    const current = getCurrentTarget(ctx.chat.id);
     if (!current) {
-      return ctx.reply("当前没有绑定的会话。");
+      return ctx.reply("当前没有绑定的终端目标。");
     }
     detachSession(ctx.chat.id);
-    ctx.reply(`已解绑会话: <code>${current}</code>\n后续命令将使用默认会话。`, { parse_mode: "HTML" });
+    ctx.reply(`已解绑终端目标: <code>${current.ref}</code>\n后续命令将使用默认终端目标。`, { parse_mode: "HTML" });
   });
 
   bot.command("open", authMiddleware, async (ctx) => {
@@ -338,12 +373,10 @@ export function registerCommands(bot: Telegraf): void {
     if (!terminal) {
       return ctx.reply("未配置终端程序。请在配置文件中设置 \"terminal\" 字段（如 \"iterm2\"）。");
     }
-    const sessionName = getSessionName(ctx.chat.id);
-    // 确保 session 存在
-    await ensureSession(ctx.chat.id);
+    const target = await ensureTarget(ctx.chat.id);
     try {
-      await tmux.openInTerminal(sessionName);
-      ctx.reply(`已在终端中打开会话: <code>${sessionName}</code>`, { parse_mode: "HTML" });
+      await getBackendForTarget(target).openInTerminal(target);
+      ctx.reply(`已在终端中打开终端目标: <code>${target.ref}</code>`, { parse_mode: "HTML" });
     } catch (err) {
       ctx.reply(`打开终端失败: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -364,18 +397,18 @@ export function registerCommands(bot: Telegraf): void {
       if (!guard.allowed) {
         return ctx.reply(buildCommandSafetyRejectMessage(guard.reason, guard.command));
       }
-      const target = await ensureSession(ctx.chat.id);
-      await tmux.sendTextAndEnter(target, cmd);
+      const target = await ensureTarget(ctx.chat.id);
+      await getBackendForTarget(target).sendTextAndEnter(target, cmd);
       await captureAndSend(ctx, target);
       await startMonitor(ctx.chat.id, target, ctx);
     });
   }
 
-  // --- Plain text: send to tmux (no Enter) ---
+  // --- Plain text: send to terminal target (no Enter) ---
   bot.on(message("text"), authMiddleware, async (ctx) => {
     const text = ctx.message.text;
-    const target = await ensureSession(ctx.chat.id);
-    await tmux.sendText(target, text);
+    const target = await ensureTarget(ctx.chat.id);
+    await getBackendForTarget(target).sendText(target, text);
   });
 }
 
