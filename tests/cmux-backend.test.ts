@@ -10,13 +10,32 @@ import type { CmuxTarget } from "../src/terminal/types.js";
 type CmuxCall = { command: string; args: string[] };
 
 const terminalTree = JSON.stringify({
-  workspaces: [
+  windows: [
     {
-      id: "workspace:1",
-      title: "Alpha",
-      surfaces: [
-        { id: "surface:2", title: "Shell", type: "terminal" },
-        { id: "surface:3", title: "Docs", type: "browser" },
+      workspaces: [
+        {
+          id: "workspace-uuid",
+          ref: "workspace:1",
+          title: "Main",
+          panes: [
+            {
+              surfaces: [
+                {
+                  id: "surface-uuid",
+                  ref: "surface:2",
+                  type: "terminal",
+                  title: "Shell",
+                },
+                {
+                  id: "browser-uuid",
+                  ref: "surface:3",
+                  type: "browser",
+                  title: "Docs",
+                },
+              ],
+            },
+          ],
+        },
       ],
     },
   ],
@@ -26,7 +45,7 @@ function cmuxTarget(): CmuxTarget {
   return {
     backend: "cmux",
     id: "workspace:1/surface:2",
-    label: "Alpha / Shell",
+    label: "Main / Shell",
     ref: "cmux:workspace:1/surface:2",
     cmuxWorkspace: "workspace:1",
     cmuxSurface: "surface:2",

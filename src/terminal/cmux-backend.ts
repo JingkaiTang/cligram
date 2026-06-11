@@ -170,7 +170,7 @@ export function parseCmuxTree(raw: string): CmuxTarget[] {
   const targets: CmuxTarget[] = [];
 
   for (const workspace of findWorkspaces(parsed)) {
-    const workspaceId = stringValue(workspace, ["id", "ref", "workspaceId", "workspace"]);
+    const workspaceId = stringValue(workspace, ["ref", "id", "workspaceId", "workspace"]);
     if (!workspaceId) {
       continue;
     }
@@ -179,7 +179,7 @@ export function parseCmuxTree(raw: string): CmuxTarget[] {
       if (!isTerminalSurface(surface)) {
         continue;
       }
-      const surfaceId = stringValue(surface, ["id", "ref", "surfaceId", "surface"]);
+      const surfaceId = stringValue(surface, ["ref", "id", "surfaceId", "surface"]);
       if (!surfaceId) {
         continue;
       }
@@ -279,6 +279,7 @@ function findWorkspaces(value: unknown): Record<string, unknown>[] {
     return (
       Array.isArray(record.workspaces) ||
       Array.isArray(record.surfaces) ||
+      Array.isArray(record.panes) ||
       kind === "workspace" ||
       Boolean(stringValue(record, ["workspaceId", "workspace"]))
     );
@@ -286,7 +287,11 @@ function findWorkspaces(value: unknown): Record<string, unknown>[] {
 }
 
 function findSurfaces(workspace: Record<string, unknown>): Record<string, unknown>[] {
-  const direct = [...arrayRecords(workspace.surfaces), ...arrayRecords(workspace.children)];
+  const direct = [
+    ...arrayRecords(workspace.surfaces),
+    ...arrayRecords(workspace.children),
+    ...arrayRecords(workspace.panes).flatMap((pane) => arrayRecords(pane.surfaces)),
+  ];
   if (direct.length > 0) {
     return direct;
   }
