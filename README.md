@@ -38,6 +38,31 @@ sudo dnf install tmux
 
 如果使用 cmux，请先安装并启动 cmux。macOS app 内置 CLI 时，可以在配置中通过 `cmuxPath` 指定 CLI 路径。
 
+cmux 默认的 socket 控制模式只允许 cmux 内部启动的终端进程访问；cligram 通常作为 launchd 服务或普通 shell 进程运行，不属于 cmux 子进程，因此需要打开 cmux 的外部自动化访问：
+
+1. 打开 cmux 设置，进入 **Automation**。
+2. 将 **Socket Control Mode** 改为 **Automation Mode**。
+3. 重启 cmux app，让 socket server 读取新的控制模式。
+4. 在普通终端中验证外部 CLI 是否可访问：
+
+   ```bash
+   /Applications/cmux.app/Contents/Resources/bin/cmux tree --all --json
+   ```
+
+   如果命令能输出 JSON，cligram 就可以通过 `/targets` 或 `/sessions` 列出 cmux surface。
+
+如果仍然看到 `Failed to write to socket (Broken pipe, errno 32)`，通常表示 cmux 仍处于默认的 `cmuxOnly` 控制模式，或者改完 Automation Mode 后还没有重启 cmux app。
+
+可选配置：
+
+```json
+{
+  "cmuxPath": "/Applications/cmux.app/Contents/Resources/bin/cmux"
+}
+```
+
+`cmuxPath` 为空时，cligram 会先从 `PATH` 查找 `cmux`，再尝试 macOS app 内置路径。
+
 ## 第一步：创建 Telegram Bot
 
 如果你还没有 Telegram Bot，需要先创建一个。整个过程在 Telegram 里完成。
@@ -181,6 +206,7 @@ cligram pair approve <配对码>
 ### 终端目标管理
 
 cligram 支持管理 tmux session 与 cmux surface。tmux 默认使用系统 socket，可与本地终端共享所有 session。
+cmux 需要先在 cmux 设置中开启 Automation Mode，并重启 cmux app 后，外部进程才能通过 cmux CLI 列出和控制 surface。
 
 | 指令 | 说明 |
 |------|------|
@@ -296,7 +322,15 @@ tmux new -s work
 ### cmuxPath
 
 - `""` — 从 PATH 查找 `cmux`
-- 填写路径 — 使用指定 cmux CLI，例如 macOS app 内置 CLI 路径
+- 填写路径 — 使用指定 cmux CLI，例如 macOS app 内置 CLI 路径：`/Applications/cmux.app/Contents/Resources/bin/cmux`
+
+使用 cmux 时，还需要在 cmux app 中将 **Settings > Automation > Socket Control Mode** 设置为 **Automation Mode**，然后重启 cmux app。可以用下面的命令确认外部 CLI 已经可用：
+
+```bash
+/Applications/cmux.app/Contents/Resources/bin/cmux tree --all --json
+```
+
+如果该命令在普通终端中失败，但在 cmux 内部终端中成功，说明外部自动化访问还没有生效。
 
 ### terminal
 
