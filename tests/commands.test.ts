@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatTargetList, parseModifierKey } from "../src/commands.ts";
-import type { TerminalTarget } from "../src/terminal/types.ts";
+import { formatTargetList, parseModifierKey } from "../src/commands.js";
+import type { TerminalTarget } from "../src/terminal/types.js";
 
 test("commands: parseModifierKey supports common styles", () => {
   assert.equal(parseModifierKey("/ctrl + c", "ctrl"), "c");
