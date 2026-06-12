@@ -12,7 +12,9 @@ import {
 const execFileAsync = promisify(execFile);
 const MACOS_CMUX_PATH = "/Applications/cmux.app/Contents/MacOS/cmux";
 const BROKEN_SOCKET_DETAIL = "cmux 已安装，但当前 socket 不可用。请启动或重启 cmux。";
+const TIMEOUT_SOCKET_DETAIL = "cmux CLI 调用超时，当前 socket 可能无响应。请启动或重启 cmux。";
 const MISSING_CLI_DETAIL = "未找到 cmux CLI，请安装 cmux，或在配置中设置 cmuxPath。";
+const CMUX_COMMAND_TIMEOUT_MS = 5000;
 
 type CmuxResult = { stdout: string; stderr: string };
 
@@ -53,7 +55,7 @@ export function createCmuxBackend(deps: CmuxBackendDeps = {}): TerminalBackend {
   }
 
   async function listTargets(): Promise<CmuxTarget[]> {
-    const { stdout } = await runCmux(["tree", "--json"]);
+    const { stdout } = await runCmux(["tree", "--all", "--json"]);
     return parseCmuxTree(stdout);
   }
 
@@ -78,7 +80,7 @@ export function createCmuxBackend(deps: CmuxBackendDeps = {}): TerminalBackend {
 
     async isAvailable() {
       try {
-        await runCmux(["tree", "--json"]);
+        await runCmux(["tree", "--all", "--json"]);
         return { available: true };
       } catch (err) {
         return normalizeAvailabilityError(err);
@@ -228,7 +230,9 @@ function hasWorkspaceLabel(target: CmuxTarget, name: string): boolean {
 }
 
 async function runCommand(command: string, args: string[]): Promise<CmuxResult> {
-  const { stdout, stderr } = await execFileAsync(command, args);
+  const { stdout, stderr } = await execFileAsync(command, args, {
+    timeout: CMUX_COMMAND_TIMEOUT_MS,
+  });
   return { stdout, stderr };
 }
 
@@ -238,6 +242,9 @@ function normalizeAvailabilityError(err: unknown) {
   }
   if (isBrokenSocketError(err)) {
     return { available: false, reason: "socket", detail: BROKEN_SOCKET_DETAIL };
+  }
+  if (isSocketTimeoutError(err)) {
+    return { available: false, reason: "socket", detail: TIMEOUT_SOCKET_DETAIL };
   }
   if (isMissingCliError(err)) {
     return { available: false, reason: "missing", detail: MISSING_CLI_DETAIL };
@@ -252,6 +259,14 @@ function normalizeAvailabilityError(err: unknown) {
 function isBrokenSocketError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return /Failed to write to socket.*Broken pipe|Broken pipe, errno 32/i.test(message);
+}
+
+function isSocketTimeoutError(err: unknown): boolean {
+  if (err && typeof err === "object" && "code" in err && (err as { code?: unknown }).code === "ETIMEDOUT") {
+    return true;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return /timed?\s*out|timeout/i.test(message);
 }
 
 function isMissingCliError(err: unknown): boolean {

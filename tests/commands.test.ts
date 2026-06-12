@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCdCommand, formatTargetList, parseModifierKey } from "../src/commands.js";
+import type { UnavailableBackend } from "../src/terminal/registry.js";
 import type { TerminalTarget } from "../src/terminal/types.js";
 
 test("commands: parseModifierKey supports common styles", () => {
@@ -92,6 +93,28 @@ test("commands: formatTargetList escapes target refs and labels for HTML", () =>
       "",
       "<b>tmux:</b>",
       "• <code>tmux:bad&lt;x&gt;</code> — A &amp; B ← 当前绑定",
+    ].join("\n"),
+  );
+});
+
+test("commands: formatTargetList shows unavailable backend diagnostics", () => {
+  const unavailableBackends: UnavailableBackend[] = [
+    {
+      kind: "cmux",
+      reason: "socket",
+      detail: "cmux 已安装，但当前 socket 不可用。请启动或重启 cmux。",
+    },
+  ];
+
+  assert.equal(
+    formatTargetList([], null, unavailableBackends),
+    [
+      "<b>终端目标列表:</b>",
+      "",
+      "暂无可用终端目标。",
+      "",
+      "<b>不可用后端:</b>",
+      "• <code>cmux</code> — cmux 已安装，但当前 socket 不可用。请启动或重启 cmux。",
     ].join("\n"),
   );
 });

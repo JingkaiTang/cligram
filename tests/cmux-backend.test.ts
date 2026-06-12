@@ -280,6 +280,33 @@ test("cmux backend: isAvailable reports broken socket as socket unavailable", as
   });
 });
 
+test("cmux backend: isAvailable reports timed out CLI calls as socket unavailable", async () => {
+  const timeoutError = Object.assign(new Error("Command timed out"), { code: "ETIMEDOUT" });
+  const { deps } = fakeDeps({
+    reject: timeoutError,
+  });
+  const backend = createCmuxBackend(deps);
+
+  assert.deepEqual(await backend.isAvailable(), {
+    available: false,
+    reason: "socket",
+    detail: "cmux CLI 调用超时，当前 socket 可能无响应。请启动或重启 cmux。",
+  });
+});
+
+test("cmux backend: listTargets queries all cmux windows", async () => {
+  const { calls, deps } = fakeDeps({ treeOutput: terminalTree });
+  const backend = createCmuxBackend(deps);
+
+  assert.deepEqual(await backend.listTargets(), [cmuxTarget()]);
+  assert.deepEqual(calls, [
+    {
+      command: "/opt/cmux",
+      args: ["tree", "--all", "--json"],
+    },
+  ]);
+});
+
 test("cmux backend: openInTerminal throws readable unsupported error", async () => {
   const backend = createCmuxBackend(fakeDeps().deps);
 

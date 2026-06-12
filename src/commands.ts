@@ -5,7 +5,11 @@ import { ensureTarget, resetTarget, attachTarget, getCurrentTarget, detachSessio
 import { captureAndSend, sendScreen, getOrCreateMonitor, stopMonitor } from "./output.js";
 import { getConfig, getOutputMode, setOutputMode, isCommandAllowed, type OutputMode } from "./config.js";
 import { createPairRequest } from "./pair-request.js";
-import { getBackendForTarget, listAllTargets } from "./terminal/registry.js";
+import {
+  getBackendForTarget,
+  listAllTargetsWithStatus,
+  type UnavailableBackend,
+} from "./terminal/registry.js";
 import { parseAttachRef, parseTargetRef } from "./terminal/target-ref.js";
 import { TerminalTargetError, type TerminalTarget } from "./terminal/types.js";
 
@@ -38,10 +42,15 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
-export function formatTargetList(targets: TerminalTarget[], current: TerminalTarget | null): string {
+export function formatTargetList(
+  targets: TerminalTarget[],
+  current: TerminalTarget | null,
+  unavailableBackends: UnavailableBackend[] = [],
+): string {
   const lines = ["<b>终端目标列表:</b>"];
   if (targets.length === 0) {
-    lines.push("", "当前没有可用终端目标。");
+    lines.push("", "暂无可用终端目标。");
+    appendUnavailableBackends(lines, unavailableBackends);
     return lines.join("\n");
   }
 
@@ -55,7 +64,20 @@ export function formatTargetList(targets: TerminalTarget[], current: TerminalTar
     }
   }
 
+  appendUnavailableBackends(lines, unavailableBackends);
+
   return lines.join("\n");
+}
+
+function appendUnavailableBackends(lines: string[], unavailableBackends: UnavailableBackend[]): void {
+  if (unavailableBackends.length === 0) {
+    return;
+  }
+
+  lines.push("", "<b>不可用后端:</b>");
+  for (const backend of unavailableBackends) {
+    lines.push(`• <code>${escapeHtml(backend.kind)}</code> — ${escapeHtml(backend.detail || backend.reason)}`);
+  }
 }
 
 function shellQuote(value: string): string {
@@ -72,8 +94,11 @@ async function replyTargets(ctx: Context): Promise<void> {
     await ctx.reply("无法识别当前会话，无法列出终端目标。");
     return;
   }
-  const targets = await listAllTargets();
-  await ctx.reply(formatTargetList(targets, getCurrentTarget(chatId)), { parse_mode: "HTML" });
+  const result = await listAllTargetsWithStatus();
+  await ctx.reply(
+    formatTargetList(result.targets, getCurrentTarget(chatId), result.unavailableBackends),
+    { parse_mode: "HTML" },
+  );
 }
 
 export function registerCommands(bot: Telegraf): void {

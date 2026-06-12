@@ -8,6 +8,7 @@ import {
   getDefaultBackend,
   getDefaultTarget,
   listAllTargets,
+  listAllTargetsWithStatus,
   registerTerminalBackend,
 } from "../src/terminal/registry.js";
 import {
@@ -45,12 +46,15 @@ function backend(
     defaultTarget?: TerminalTarget;
     isAvailableError?: Error;
     listTargetsError?: Error;
+    reason?: string;
+    detail?: string;
     targets?: TerminalTarget[];
   } = {},
 ): TerminalBackend {
   const availability: BackendAvailability = {
     available: options.available ?? true,
-    reason: options.available === false ? "missing" : undefined,
+    reason: options.reason ?? (options.available === false ? "missing" : undefined),
+    detail: options.detail,
   };
   const fallbackTarget = kind === "tmux" ? tmuxTarget("default") : cmuxTarget("default");
 
@@ -233,4 +237,58 @@ test("terminal registry: skips backends whose target listing throws", async () =
   );
 
   assert.deepEqual(await listAllTargets(), [tmuxTarget("visible")]);
+});
+
+test("terminal registry: reports unavailable backends when listing targets with status", async () => {
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(
+    backend("tmux", {
+      targets: [tmuxTarget("visible")],
+    }),
+  );
+  registerTerminalBackend(
+    backend("cmux", {
+      available: false,
+      reason: "socket",
+      detail: "cmux socket unavailable",
+      targets: [cmuxTarget("hidden")],
+    }),
+  );
+
+  assert.deepEqual(await listAllTargetsWithStatus(), {
+    targets: [tmuxTarget("visible")],
+    unavailableBackends: [
+      {
+        kind: "cmux",
+        reason: "socket",
+        detail: "cmux socket unavailable",
+      },
+    ],
+  });
+});
+
+test("terminal registry: reports target listing errors when listing targets with status", async () => {
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(
+    backend("tmux", {
+      targets: [tmuxTarget("visible")],
+    }),
+  );
+  registerTerminalBackend(
+    backend("cmux", {
+      listTargetsError: new Error("cmux list failed"),
+      targets: [cmuxTarget("hidden")],
+    }),
+  );
+
+  assert.deepEqual(await listAllTargetsWithStatus(), {
+    targets: [tmuxTarget("visible")],
+    unavailableBackends: [
+      {
+        kind: "cmux",
+        reason: "list failed",
+        detail: "cmux list failed",
+      },
+    ],
+  });
 });

@@ -1,12 +1,24 @@
 import {
   TerminalTargetError,
   type BackendKind,
+  type BackendAvailability,
   type TerminalBackend,
   type TerminalTarget,
 } from "./types.js";
 
 const backends = new Map<BackendKind, TerminalBackend>();
 const defaultBackendPriority: BackendKind[] = ["tmux", "cmux"];
+
+export interface UnavailableBackend {
+  kind: BackendKind;
+  reason: string;
+  detail: string;
+}
+
+export interface TargetListResult {
+  targets: TerminalTarget[];
+  unavailableBackends: UnavailableBackend[];
+}
 
 export function registerTerminalBackend(backend: TerminalBackend): void {
   backends.set(backend.kind, backend);
@@ -56,19 +68,46 @@ export async function getDefaultTarget(chatId: number): Promise<TerminalTarget> 
 }
 
 export async function listAllTargets(): Promise<TerminalTarget[]> {
+  return (await listAllTargetsWithStatus()).targets;
+}
+
+export async function listAllTargetsWithStatus(): Promise<TargetListResult> {
   const targets: TerminalTarget[] = [];
+  const unavailableBackends: UnavailableBackend[] = [];
   for (const backend of backends.values()) {
-    if (!(await isBackendAvailable(backend))) {
+    let availability: BackendAvailability;
+    try {
+      availability = await backend.isAvailable();
+    } catch (err) {
+      unavailableBackends.push({
+        kind: backend.kind,
+        reason: "availability check failed",
+        detail: errorDetail(err),
+      });
+      continue;
+    }
+
+    if (!availability.available) {
+      unavailableBackends.push({
+        kind: backend.kind,
+        reason: availability.reason ?? "unavailable",
+        detail: availability.detail ?? availability.reason ?? "不可用",
+      });
       continue;
     }
 
     try {
       targets.push(...(await backend.listTargets()));
-    } catch {
+    } catch (err) {
+      unavailableBackends.push({
+        kind: backend.kind,
+        reason: "list failed",
+        detail: errorDetail(err),
+      });
       continue;
     }
   }
-  return targets;
+  return { targets, unavailableBackends };
 }
 
 export function __resetTerminalBackendsForTests(): void {
@@ -82,4 +121,8 @@ async function isBackendAvailable(backend: TerminalBackend): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function errorDetail(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
