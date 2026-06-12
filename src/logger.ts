@@ -51,3 +51,6 @@ export function logWarn(scope: string, message: string, meta?: LogMeta, err?: un
 export function logError(scope: string, message: string, err?: unknown, meta?: LogMeta): void {
   emit("ERROR", scope, message, meta, err);
 }
+
+// 仅用于测试
+export const __normalizeErrorForTests = normalizeError;

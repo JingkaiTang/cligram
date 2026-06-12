@@ -504,3 +504,8 @@ export function stopMonitor(chatId: number): boolean {
   monitor.stop();
   return true;
 }
+
+// 仅用于测试
+export const __escapeHtmlForTests = escapeHtml;
+export const __trimOutputForTests = trimOutput;
+export const __detectInteractivePromptForTests = detectInteractivePrompt;

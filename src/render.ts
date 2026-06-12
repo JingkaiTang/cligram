@@ -72,3 +72,7 @@ export async function renderTerminalImage(text: string): Promise<Buffer> {
 
   return sharp(Buffer.from(svg)).png().toBuffer() as Promise<Buffer>;
 }
+
+// 仅用于测试
+export const __escapeXmlForTests = escapeXml;
+export const __displayWidthForTests = displayWidth;

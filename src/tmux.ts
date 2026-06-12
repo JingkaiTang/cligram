@@ -184,3 +184,6 @@ export async function openInTerminal(sessionName: string): Promise<void> {
     await execFile("sh", ["-c", cmd]);
   }
 }
+
+// 仅用于测试
+export const __shellEscapeForTests = shellEscape;
