@@ -29,6 +29,15 @@ require_cmd() {
   has_cmd "$cmd" || die "缺少命令 '$cmd'。$hint"
 }
 
+append_path_dir() {
+  local dir="$1"
+  [ -n "$dir" ] || return
+  case ":$EXTRA_PATHS:" in
+    *":$dir:"*) ;;
+    *) EXTRA_PATHS="${EXTRA_PATHS:+${EXTRA_PATHS}:}${dir}" ;;
+  esac
+}
+
 ensure_writable_dir() {
   local dir="$1"
   local hint="$2"
@@ -51,6 +60,44 @@ require_config_hint() {
   elif [ ! -r "$config_path" ]; then
     die "配置文件不可读: $config_path。请检查文件权限。"
   fi
+}
+
+configured_cmux_path() {
+  local config_path="$HOME/.cligram/config.json"
+  [ -r "$config_path" ] || return 0
+  "$NODE_BIN" -e '
+const fs = require("fs");
+try {
+  const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).cmuxPath;
+  if (typeof value === "string") process.stdout.write(value.trim());
+} catch {}
+' "$config_path" 2>/dev/null || true
+}
+
+detect_cmux_bin() {
+  local configured
+  configured="$(configured_cmux_path)"
+  if [ -n "$configured" ] && [ -x "$configured" ]; then
+    echo "$configured"
+    return
+  fi
+
+  if has_cmd "cmux"; then
+    command -v cmux
+    return
+  fi
+
+  if [ -x "/Applications/cmux.app/Contents/MacOS/cmux" ]; then
+    echo "/Applications/cmux.app/Contents/MacOS/cmux"
+  fi
+}
+
+require_terminal_backend() {
+  if [ -n "$TMUX_BIN" ] || [ -n "$CMUX_BIN" ]; then
+    return
+  fi
+
+  die "未找到可用终端后端。请安装 tmux，或启动/配置 cmux（可在 ~/.cligram/config.json 设置 cmuxPath）。"
 }
 
 # ── 平台检测 ──
@@ -80,9 +127,13 @@ fi
 
 # 探测 tmux 所在目录，加入 PATH
 TMUX_BIN="$(command -v tmux 2>/dev/null || true)"
+CMUX_BIN="$(detect_cmux_bin)"
 EXTRA_PATHS=""
 if [ -n "$TMUX_BIN" ]; then
-  EXTRA_PATHS="$(dirname "$TMUX_BIN")"
+  append_path_dir "$(dirname "$TMUX_BIN")"
+fi
+if [ -n "$CMUX_BIN" ]; then
+  append_path_dir "$(dirname "$CMUX_BIN")"
 fi
 
 # 构建 PATH: node 所在目录 + tmux 所在目录 + 常见路径
@@ -188,7 +239,7 @@ ensure_linger_enabled() {
 
 check_install_environment() {
   require_cmd "npm" "请安装 npm（通常随 Node.js 一起安装），并确保 'npm -v' 可用。"
-  require_cmd "tmux" "请先安装 tmux，并确保 'tmux -V' 可用。"
+  require_terminal_backend
 
   [ -d "$PROJECT_DIR" ] || die "项目目录不存在: $PROJECT_DIR"
   [ -w "$PROJECT_DIR" ] || die "项目目录不可写: $PROJECT_DIR。请检查目录权限。"
@@ -212,7 +263,7 @@ check_install_environment() {
 }
 
 check_runtime_environment() {
-  require_cmd "tmux" "请先安装 tmux，并确保 'tmux -V' 可用。"
+  require_terminal_backend
   require_runtime_entry
   require_config_hint
   ensure_writable_dir "$LOG_DIR" "请检查日志目录权限。"

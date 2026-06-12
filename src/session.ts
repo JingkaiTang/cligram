@@ -8,9 +8,15 @@ import { TerminalTargetError, type TerminalTarget } from "./terminal/types.js";
 
 /** chatId -> 手动绑定的终端目标 */
 const chatTargetMap = new Map<number, TerminalTarget>();
+let resetTargetCounter = 0;
 
 function sessionName(chatId: number): string {
   return `${SESSION_PREFIX}${chatId}`;
+}
+
+function resetTargetName(chatId: number): string {
+  resetTargetCounter += 1;
+  return `${sessionName(chatId)}-${Date.now()}-${resetTargetCounter}`;
 }
 
 function tmuxPaneTarget(target: TerminalTarget): string {
@@ -48,7 +54,7 @@ export async function resetTarget(chatId: number): Promise<TerminalTarget> {
   if (current) {
     const backend = getBackendForTarget(current);
     if (await backend.targetExists(current)) {
-      const target = await backend.createTarget(chatId);
+      const target = await backend.createTarget(chatId, { name: resetTargetName(chatId) });
       chatTargetMap.set(chatId, target);
       return target;
     }
@@ -56,7 +62,7 @@ export async function resetTarget(chatId: number): Promise<TerminalTarget> {
   }
 
   const backend = await getDefaultBackend();
-  const target = await backend.createTarget(chatId);
+  const target = await backend.createTarget(chatId, { name: resetTargetName(chatId) });
   chatTargetMap.set(chatId, target);
   return target;
 }
@@ -120,4 +126,5 @@ export function __setTmuxApiForTests(): void {}
 // 仅用于测试
 export function __resetSessionStateForTests(): void {
   chatTargetMap.clear();
+  resetTargetCounter = 0;
 }

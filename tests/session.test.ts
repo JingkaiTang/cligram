@@ -16,6 +16,7 @@ import {
 import type {
   BackendAvailability,
   BackendKind,
+  CreateTargetOptions,
   TerminalBackend,
   TerminalTarget,
 } from "../src/terminal/types.js";
@@ -45,6 +46,7 @@ function fakeBackend(
   state: {
     defaultTarget: TerminalTarget;
     created?: TerminalTarget[];
+    createOptions?: CreateTargetOptions[];
     defaultCalls?: number;
     exists?: Set<string>;
   },
@@ -58,11 +60,13 @@ function fakeBackend(
       state.defaultCalls = (state.defaultCalls ?? 0) + 1;
       return state.defaultTarget;
     },
-    async createTarget() {
+    async createTarget(_chatId, options = {}) {
+      state.createOptions?.push(options);
+      const name = options.name ?? `${kind}-created-${(state.created?.length ?? 0) + 1}`;
       const target =
         kind === "tmux"
-          ? tmuxTarget(`${kind}-created-${(state.created?.length ?? 0) + 1}`)
-          : cmuxTarget(`${kind}-created-${(state.created?.length ?? 0) + 1}`);
+          ? tmuxTarget(name)
+          : cmuxTarget(name);
       state.created?.push(target);
       state.exists?.add(target.ref);
       return target;
@@ -152,6 +156,27 @@ test("session: resetTarget without binding does not call defaultTarget", async (
 
   assert.equal(state.defaultCalls, 0);
   assert.deepEqual(state.created, [target]);
+  assert.deepEqual(getCurrentTarget(42), target);
+});
+
+test("session: resetTarget creates a unique target name instead of canonical default", async () => {
+  const state = {
+    defaultTarget: tmuxTarget("cg-42"),
+    created: [] as TerminalTarget[],
+    createOptions: [] as CreateTargetOptions[],
+    exists: new Set<string>(["tmux:cg-42"]),
+  };
+  __resetTerminalBackendsForTests();
+  registerTerminalBackend(fakeBackend("tmux", state));
+
+  assert.deepEqual(await ensureTarget(42), state.defaultTarget);
+
+  const target = await resetTarget(42);
+
+  assert.equal(state.createOptions.length, 1);
+  assert.notEqual(state.createOptions[0].name, "cg-42");
+  assert.match(state.createOptions[0].name ?? "", /^cg-42-\d+-\d+$/);
+  assert.equal(target.id, state.createOptions[0].name);
   assert.deepEqual(getCurrentTarget(42), target);
 });
 

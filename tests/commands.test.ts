@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatTargetList, parseModifierKey } from "../src/commands.js";
+import { buildCdCommand, formatTargetList, parseModifierKey } from "../src/commands.js";
 import type { TerminalTarget } from "../src/terminal/types.js";
 
 test("commands: parseModifierKey supports common styles", () => {
@@ -14,6 +14,17 @@ test("commands: parseModifierKey returns null for invalid input", () => {
   assert.equal(parseModifierKey("/ctrl", "ctrl"), null);
   assert.equal(parseModifierKey("ctrl + c", "ctrl"), null);
   assert.equal(parseModifierKey("/shift", "shift"), null);
+});
+
+test("commands: buildCdCommand quotes shell metacharacters as a single argument", () => {
+  assert.equal(buildCdCommand("/tmp/a; rm -rf / && echo nope"), "cd -- '/tmp/a; rm -rf / && echo nope'");
+});
+
+test("commands: buildCdCommand escapes single quotes and preserves newlines inside argument", () => {
+  assert.equal(
+    buildCdCommand("/tmp/it's\nfine"),
+    "cd -- '/tmp/it'\\''s\nfine'",
+  );
 });
 
 test("commands: formatTargetList groups targets and marks current binding", () => {

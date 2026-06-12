@@ -58,6 +58,14 @@ export function formatTargetList(targets: TerminalTarget[], current: TerminalTar
   return lines.join("\n");
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+export function buildCdCommand(dir: string): string {
+  return `cd -- ${shellQuote(dir)}`;
+}
+
 async function replyTargets(ctx: Context): Promise<void> {
   const chatId = ctx.chat?.id;
   if (!chatId) {
@@ -229,7 +237,7 @@ export function registerCommands(bot: Telegraf): void {
       return ctx.reply("用法: /cd <path>");
     }
     const target = await ensureTarget(ctx.chat.id);
-    await getBackendForTarget(target).sendTextAndEnter(target, `cd ${dir}`);
+    await getBackendForTarget(target).sendTextAndEnter(target, buildCdCommand(dir));
     await captureAndSend(ctx, target);
     await startMonitor(ctx.chat.id, target, ctx);
   });
