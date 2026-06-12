@@ -1,16 +1,16 @@
 # cligram
 
-通过 Telegram Bot 远程控制终端的命令行工具，基于 tmux 管理会话。
+通过 Telegram Bot 远程控制终端的命令行工具，支持 tmux 与 cmux 终端目标。
 
-在手机上打开 Telegram，就能随时随地操作你电脑上的终端——执行命令、查看输出、管理会话。
+在手机上打开 Telegram，就能随时随地操作你电脑上的终端——执行命令、查看输出、管理终端目标。
 
 ## 功能特性
 
 - 通过 Telegram 消息远程执行终端命令
-- 基于 tmux 的持久会话，断连不丢失
+- 基于 tmux 或 cmux 的持久终端目标，断连不丢失
 - 支持文本 / 图片两种输出模式（图片模式适合手机端阅读）
 - 屏幕变化自动推送，无需手动刷新
-- 与本地终端（iTerm2 / Terminal.app）共享 tmux 会话
+- 与本地终端（iTerm2 / Terminal.app）共享 tmux 会话，也可连接 cmux surface
 - 自定义指令映射，一键执行常用命令
 - 配对码 + 本机确认双重认证，防止未授权访问
 - 支持 macOS (launchd) 和 Linux (systemd) 系统服务
@@ -18,8 +18,8 @@
 ## 前置要求
 
 - [Node.js](https://nodejs.org/) >= 18
-- [tmux](https://github.com/tmux/tmux)
 - 一个 Telegram 账号
+- 至少一个可用终端后端：[tmux](https://github.com/tmux/tmux) 或 cmux
 
 ### 安装 tmux
 
@@ -33,6 +33,10 @@ sudo apt install tmux
 # CentOS / Fedora
 sudo dnf install tmux
 ```
+
+### 使用 cmux
+
+如果使用 cmux，请先安装并启动 cmux。macOS app 内置 CLI 时，可以在配置中通过 `cmuxPath` 指定 CLI 路径。
 
 ## 第一步：创建 Telegram Bot
 
@@ -80,6 +84,7 @@ cp config.example.json ~/.cligram/config.json
   "commandAllowlist": [],
   "commandBlocklist": [],
   "tmuxSocket": "",
+  "cmuxPath": "",
   "terminal": "iterm2"
 }
 ```
@@ -98,7 +103,7 @@ npm run service:install
 
 这会自动编译项目、注册系统服务、安装全局 `cligram` 命令，并立即启动。
 
-安装过程中会执行环境自检（`node`/`npm`/`tmux`、服务管理器可用性、目录写权限、配置文件可读性），失败时会给出具体修复提示。
+安装过程中会执行环境自检（`node`/`npm`、终端后端可用性、服务管理器可用性、目录写权限、配置文件可读性），失败时会给出具体修复提示。
 
 安装完成后，用 `cligram` 命令管理服务：
 
@@ -156,7 +161,7 @@ cligram pair approve <配对码>
 | `/pwd` | 显示当前目录 |
 | `/screen [n]` | 截屏（n 为页数，默认 1） |
 | `/mode [text\|image]` | 查看或切换输出模式 |
-| `/new` | 新建终端会话 |
+| `/new` | 新建终端目标 |
 | `/pair` | 申请配对码（需本机执行 `cligram pair approve <配对码>` 批准） |
 
 直接输入文本（不带 `/`）会将内容发送到终端，但不按回车。适合交互式输入。
@@ -173,16 +178,25 @@ cligram pair approve <配对码>
 | `/shift + <key>` | Shift 组合键 |
 | `/cmd + <key>` | Cmd 组合键（映射为 Ctrl） |
 
-### 会话管理
+### 终端目标管理
 
-cligram 默认使用系统 tmux socket，与本地终端共享所有 session：
+cligram 支持管理 tmux session 与 cmux surface。tmux 默认使用系统 socket，可与本地终端共享所有 session。
 
 | 指令 | 说明 |
 |------|------|
-| `/sessions` | 列出所有 tmux 会话 |
-| `/attach <session>` | 绑定到指定的 tmux 会话 |
-| `/detach` | 解绑当前会话 |
-| `/open` | 在本机终端中打开当前会话 |
+| `/targets` | 列出所有终端目标 |
+| `/sessions` | 兼容别名，等同于 `/targets` |
+| `/attach <target>` | 绑定到指定终端目标 |
+| `/detach` | 解绑当前终端目标 |
+| `/open` | 在本机终端中打开当前目标；当前主要用于 tmux，本机 cmux target 可能返回暂不支持 |
+
+`target` 支持以下引用格式：
+
+- `tmux:<session>`：tmux session
+- `cmux:<surface>`：当前 cmux workspace 下的 surface
+- `cmux:<workspace>/<surface>`：指定 cmux workspace 下的 surface
+
+兼容旧用法：`/attach work` 会按 tmux session 处理，等同于 `/attach tmux:work`。
 
 例如，在 iTerm2 中创建了一个 tmux session：
 
@@ -193,8 +207,8 @@ tmux new -s work
 在 Telegram 中就可以：
 
 ```
-/sessions       → 列出所有 session，会看到 "work"
-/attach work    → 切换到 work session
+/targets        → 列出所有终端目标，会看到 "tmux:work"
+/attach work    → 切换到 work session（兼容旧用法）
 /open           → 在 iTerm2 中也打开 work session
 ```
 
@@ -237,6 +251,7 @@ tmux new -s work
   "idleTimeoutMs": 30000,
   "screenLines": 50,
   "tmuxSocket": "",
+  "cmuxPath": "",
   "terminal": "iterm2",
   "font": {
     "family": "Menlo, 'SF Mono', Consolas, monospace",
@@ -254,7 +269,7 @@ tmux new -s work
 | `pairedUsers` | number[] | `[]` | 已配对的用户 ID 列表（自动维护） |
 | `outputMode` | string | `"text"` | 输出模式：`text` 或 `image` |
 | `outputModeByChat` | object | `{}` | 按 chatId 保存的输出模式；未命中时回退到 `outputMode` |
-| `sessionStartDir` | string | `""` | 新建 tmux 会话起始目录；空值表示用户 HOME |
+| `sessionStartDir` | string | `""` | 新建终端目标起始目录；对 tmux/cmux 创建命令均适用，空值表示用户 HOME |
 | `commandSafetyMode` | string | `"off"` | 命令安全档位：`off`/`whitelist`/`blacklist` |
 | `commandAllowlist` | string[] | `[]` | `whitelist` 模式下允许执行的命令名（首 token） |
 | `commandBlocklist` | string[] | `[]` | `blacklist` 模式下禁止执行的命令名（首 token） |
@@ -263,7 +278,8 @@ tmux new -s work
 | `idleTimeoutMs` | number | `30000` | 屏幕无变化自动停止监控的超时（毫秒） |
 | `screenLines` | number | `50` | `/screen` 截屏每页行数 |
 | `tmuxSocket` | string | `""` | tmux socket 路径，空则使用系统默认 |
-| `terminal` | string | `""` | `/open` 使用的终端程序 |
+| `cmuxPath` | string | `""` | cmux CLI 路径，空则从 PATH 查找 |
+| `terminal` | string | `""` | `/open` 使用的终端程序；当前主要用于 tmux，本机 cmux target 可能返回暂不支持 |
 | `font` | object | *见下* | 图片模式字体配置 |
 | `customCommands` | object | `{}` | 自定义指令映射 |
 
@@ -274,12 +290,17 @@ tmux new -s work
 
 ### sessionStartDir
 
-- `""`（默认）— 新建会话从用户 HOME 目录启动
-- 填写绝对路径 — 新建会话从指定目录启动
+- `""`（默认）— 新建终端目标从用户 HOME 目录启动
+- 填写绝对路径 — 新建终端目标从指定目录启动
+
+### cmuxPath
+
+- `""` — 从 PATH 查找 `cmux`
+- 填写路径 — 使用指定 cmux CLI，例如 macOS app 内置 CLI 路径
 
 ### terminal
 
-用于 `/open` 指令，在本机终端打开当前 session：
+用于 `/open` 指令，在本机终端打开当前目标。当前主要用于 tmux，本机 cmux target 可能返回暂不支持：
 
 - `"iterm2"` — 内置预设，通过 AppleScript 打开 iTerm2 新窗口
 - `"terminal"` — 内置预设，macOS 自带 Terminal.app
@@ -344,7 +365,7 @@ loginctl show-user "$USER" -p Linger
 npm test
 ```
 
-当前覆盖重点：配置解析、配对流程、会话映射、命令解析、输出分块。
+当前覆盖重点：配置解析、配对流程、终端目标映射、命令解析、输出分块。
 
 ## License
 
