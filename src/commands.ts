@@ -31,6 +31,13 @@ async function startMonitor(chatId: number, target: TerminalTarget, ctx: Context
   await monitor.start(target, ctx);
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 export function formatTargetList(targets: TerminalTarget[], current: TerminalTarget | null): string {
   const lines = ["<b>终端目标列表:</b>"];
   if (targets.length === 0) {
@@ -44,7 +51,7 @@ export function formatTargetList(targets: TerminalTarget[], current: TerminalTar
     lines.push("", `<b>${backend}:</b>`);
     for (const target of group) {
       const marker = current?.ref === target.ref ? " ← 当前绑定" : "";
-      lines.push(`• <code>${target.ref}</code> — ${target.label}${marker}`);
+      lines.push(`• <code>${escapeHtml(target.ref)}</code> — ${escapeHtml(target.label)}${marker}`);
     }
   }
 
@@ -198,7 +205,7 @@ export function registerCommands(bot: Telegraf): void {
   bot.command("new", authMiddleware, async (ctx) => {
     const target = await resetTarget(ctx.chat.id);
     await captureAndSend(ctx, target, 200);
-    await ctx.reply(`已创建新的终端目标: <code>${target.ref}</code>`, { parse_mode: "HTML" });
+    await ctx.reply(`已创建新的终端目标: <code>${escapeHtml(target.ref)}</code>`, { parse_mode: "HTML" });
   });
 
   bot.command("exec", authMiddleware, async (ctx) => {
@@ -356,7 +363,7 @@ export function registerCommands(bot: Telegraf): void {
       return ctx.reply(`目标不存在: ${raw}\n使用 /targets 查看可用目标。`);
     }
     await captureAndSend(ctx, target, 200);
-    await ctx.reply(`已绑定到终端目标: <code>${target.ref}</code>`, { parse_mode: "HTML" });
+    await ctx.reply(`已绑定到终端目标: <code>${escapeHtml(target.ref)}</code>`, { parse_mode: "HTML" });
   });
 
   bot.command("detach", authMiddleware, (ctx) => {
@@ -365,7 +372,7 @@ export function registerCommands(bot: Telegraf): void {
       return ctx.reply("当前没有绑定的终端目标。");
     }
     detachSession(ctx.chat.id);
-    ctx.reply(`已解绑终端目标: <code>${current.ref}</code>\n后续命令将使用默认终端目标。`, { parse_mode: "HTML" });
+    ctx.reply(`已解绑终端目标: <code>${escapeHtml(current.ref)}</code>\n后续命令将使用默认终端目标。`, { parse_mode: "HTML" });
   });
 
   bot.command("open", authMiddleware, async (ctx) => {
@@ -376,7 +383,7 @@ export function registerCommands(bot: Telegraf): void {
     const target = await ensureTarget(ctx.chat.id);
     try {
       await getBackendForTarget(target).openInTerminal(target);
-      ctx.reply(`已在终端中打开终端目标: <code>${target.ref}</code>`, { parse_mode: "HTML" });
+      ctx.reply(`已在终端中打开终端目标: <code>${escapeHtml(target.ref)}</code>`, { parse_mode: "HTML" });
     } catch (err) {
       ctx.reply(`打开终端失败: ${err instanceof Error ? err.message : String(err)}`);
     }

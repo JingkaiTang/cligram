@@ -64,3 +64,23 @@ test("commands: formatTargetList groups targets and marks current binding", () =
     ].join("\n"),
   );
 });
+
+test("commands: formatTargetList escapes target refs and labels for HTML", () => {
+  const target: TerminalTarget = {
+    backend: "tmux",
+    id: "bad<x>",
+    label: "A & B",
+    ref: "tmux:bad<x>",
+    tmuxSession: "bad<x>",
+  };
+
+  assert.equal(
+    formatTargetList([target], target),
+    [
+      "<b>终端目标列表:</b>",
+      "",
+      "<b>tmux:</b>",
+      "• <code>tmux:bad&lt;x&gt;</code> — A &amp; B ← 当前绑定",
+    ].join("\n"),
+  );
+});
