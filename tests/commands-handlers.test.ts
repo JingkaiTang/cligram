@@ -13,6 +13,7 @@ import {
   __resetSessionStateForTests,
   attachTarget,
 } from "../src/session.ts";
+import { stopMonitor } from "../src/output.ts";
 import {
   __resetTerminalBackendsForTests,
   registerTerminalBackend,
@@ -149,6 +150,7 @@ function setupBackend(kind: BackendKind, state: Partial<BackendState> = {}) {
 // ── tests ──────────────────────────────────────────────
 
 test.afterEach(() => {
+  stopMonitor(100);
   __resetAuthStateForTests();
   __resetSessionStateForTests();
   __resetTerminalBackendsForTests();

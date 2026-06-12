@@ -7,13 +7,20 @@ export interface MockReply {
   options?: unknown;
 }
 
+export interface MockPhoto {
+  photo: unknown;
+  options?: unknown;
+}
+
 export interface MockContext {
   chat: { id: number };
   from: { id: number; username?: string };
   message: { text: string };
   reply: (text: string, options?: unknown) => Promise<void>;
+  replyWithPhoto: (photo: unknown, options?: unknown) => Promise<void>;
   telegram: {
     sendMessage: (chatId: number, text: string, options?: unknown) => Promise<void>;
+    sendPhoto: (chatId: number, photo: unknown, options?: unknown) => Promise<void>;
   };
 }
 
@@ -34,7 +41,9 @@ export interface MockBot {
 
 export function createMockContext(overrides: Partial<MockContext> = {}): MockContext {
   const replies: MockReply[] = [];
+  const photos: MockPhoto[] = [];
   const sentMessages: Array<{ chatId: number; text: string; options?: unknown }> = [];
+  const sentPhotos: Array<{ chatId: number; photo: unknown; options?: unknown }> = [];
 
   const ctx: MockContext = {
     chat: { id: 100 },
@@ -43,9 +52,15 @@ export function createMockContext(overrides: Partial<MockContext> = {}): MockCon
     reply: async (text: string, options?: unknown) => {
       replies.push({ text, options });
     },
+    replyWithPhoto: async (photo: unknown, options?: unknown) => {
+      photos.push({ photo, options });
+    },
     telegram: {
       sendMessage: async (chatId: number, text: string, options?: unknown) => {
         sentMessages.push({ chatId, text, options });
+      },
+      sendPhoto: async (chatId: number, photo: unknown, options?: unknown) => {
+        sentPhotos.push({ chatId, photo, options });
       },
     },
     ...overrides,
@@ -53,7 +68,9 @@ export function createMockContext(overrides: Partial<MockContext> = {}): MockCon
 
   // 附加收集器到 ctx 上以便测试断言
   (ctx as any).__replies = replies;
+  (ctx as any).__photos = photos;
   (ctx as any).__sentMessages = sentMessages;
+  (ctx as any).__sentPhotos = sentPhotos;
 
   return ctx;
 }
@@ -62,8 +79,16 @@ export function getReplies(ctx: MockContext): MockReply[] {
   return (ctx as any).__replies ?? [];
 }
 
+export function getPhotos(ctx: MockContext): MockPhoto[] {
+  return (ctx as any).__photos ?? [];
+}
+
 export function getSentMessages(ctx: MockContext): Array<{ chatId: number; text: string; options?: unknown }> {
   return (ctx as any).__sentMessages ?? [];
+}
+
+export function getSentPhotos(ctx: MockContext): Array<{ chatId: number; photo: unknown; options?: unknown }> {
+  return (ctx as any).__sentPhotos ?? [];
 }
 
 /**
@@ -116,4 +141,34 @@ export function createMockBot(): MockBot {
   };
 
   return bot;
+}
+
+function parseCommandName(text: string): string | null {
+  const match = text.match(/^\/([a-z0-9_]{1,32})(?:@\w+)?(?:\s|$)/i);
+  return match?.[1].toLowerCase() ?? null;
+}
+
+/** 模拟 Telegram text update，从 bot 注册入口按 command/text 规则分发。 */
+export async function dispatchTextMessage(
+  bot: MockBot,
+  text: string,
+  overrides: Partial<MockContext> = {},
+): Promise<MockContext> {
+  const ctx = createMockContext({
+    ...overrides,
+    message: { text },
+  });
+
+  const commandName = parseCommandName(text);
+  const handler = commandName ? bot.getHandler(commandName) : undefined;
+  if (handler) {
+    await handler(ctx);
+    return ctx;
+  }
+
+  const textHandler = bot.getTextHandler();
+  if (textHandler) {
+    await textHandler(ctx);
+  }
+  return ctx;
 }

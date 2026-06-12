@@ -65,6 +65,36 @@ function detectInteractivePrompt(text: string): boolean {
   return INTERACTIVE_PATTERNS.some((re) => re.test(text));
 }
 
+interface TelegramApiResponse {
+  ok?: boolean;
+  description?: string;
+  error_code?: number;
+}
+
+async function uploadTelegramPhoto(
+  chatId: number,
+  png: Buffer,
+  caption?: string,
+): Promise<void> {
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  if (caption) {
+    form.set("caption", caption);
+  }
+  const photoBytes = png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) as ArrayBuffer;
+  form.set("photo", new Blob([photoBytes], { type: "image/png" }), "terminal.png");
+
+  const response = await fetch(`https://api.telegram.org/bot${getConfig().botToken}/sendPhoto`, {
+    method: "POST",
+    body: form,
+  });
+  const data = await response.json().catch(() => undefined) as TelegramApiResponse | undefined;
+  if (!response.ok || !data?.ok) {
+    const detail = data?.description ? `: ${data.description}` : "";
+    throw new Error(`Telegram sendPhoto failed (${response.status})${detail}`);
+  }
+}
+
 export function chunkEscapedText(
   escaped: string,
   maxMessageLength: number = MAX_MESSAGE_LENGTH,
@@ -158,14 +188,15 @@ async function replyWithImage(
   caption?: string,
 ): Promise<boolean> {
   try {
+    const chatId = resolveChatId(ctx);
+    if (!chatId) {
+      throw new Error("无法识别当前会话，无法发送图片。");
+    }
     const png = await renderTerminalImage(text);
-    await ctx.replyWithPhoto(
-      { source: png, filename: "terminal.png" },
-      caption ? { caption } : undefined,
-    );
+    await uploadTelegramPhoto(chatId, png, caption);
     return true;
   } catch (err) {
-    logWarn("output.replyWithImage", "image render failed, fallback to text", undefined, err);
+    logWarn("output.replyWithImage", "image send failed, fallback to text", undefined, err);
     return false;
   }
 }
@@ -178,14 +209,10 @@ async function sendImageMessage(
 ): Promise<boolean> {
   try {
     const png = await renderTerminalImage(text);
-    await ctx.telegram.sendPhoto(
-      chatId,
-      { source: png, filename: "terminal.png" },
-      caption ? { caption } : undefined,
-    );
+    await uploadTelegramPhoto(chatId, png, caption);
     return true;
   } catch (err) {
-    logWarn("output.sendImageMessage", "image render failed, fallback to text", { chatId }, err);
+    logWarn("output.sendImageMessage", "image send failed, fallback to text", { chatId }, err);
     return false;
   }
 }

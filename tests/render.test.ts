@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { __escapeXmlForTests as escapeXml, __displayWidthForTests as displayWidth } from "../src/render.ts";
+import sharp from "sharp";
+import {
+  __displayWidthForTests as displayWidth,
+  __escapeXmlForTests as escapeXml,
+  renderTerminalImage,
+} from "../src/render.ts";
+import { loadConfig } from "../src/config.ts";
+import { createTempConfig, withArgvConfig } from "./helpers.ts";
 
 test("render: escapeXml escapes ampersand", () => {
   assert.equal(escapeXml("a & b"), "a &amp; b");
@@ -49,4 +56,29 @@ test("render: displayWidth handles fullwidth forms as 2", () => {
 
 test("render: displayWidth handles empty string", () => {
   assert.equal(displayWidth(""), 0);
+});
+
+test("render: terminal image tolerates ANSI and control characters from terminal output", async () => {
+  const configPath = await createTempConfig();
+  await withArgvConfig(configPath, async () => {
+    await loadConfig();
+  });
+
+  const png = await renderTerminalImage("normal\n\u001b[31mred text\u001b[0m\nbell:\u0007 done");
+
+  assert.ok(png.length > 0);
+  assert.equal(png.subarray(1, 4).toString("ascii"), "PNG");
+});
+
+test("render: terminal image wraps very long lines to a bounded width", async () => {
+  const configPath = await createTempConfig();
+  await withArgvConfig(configPath, async () => {
+    await loadConfig();
+  });
+
+  const png = await renderTerminalImage("x".repeat(1000));
+  const metadata = await sharp(png).metadata();
+
+  assert.ok((metadata.width ?? 0) <= 3000);
+  assert.ok((metadata.height ?? 0) > 84);
 });

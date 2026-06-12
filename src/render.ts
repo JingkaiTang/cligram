@@ -8,6 +8,9 @@ const BG_COLOR = "#1e1e2e";
 const FG_COLOR = "#cdd6f4";
 const BORDER_RADIUS = 8;
 const SCALE = 2; // 2x 渲染倍率，解决高 DPI 屏幕模糊问题
+const MAX_DISPLAY_COLUMNS = 160;
+const ANSI_ESCAPE_RE = /(?:\x1B\][\s\S]*?(?:\x07|\x1B\\)|\x1B\[[0-?]*[ -/]*[@-~]|\x9B[0-?]*[ -/]*[@-~]|\x1B[PX^_][\s\S]*?\x1B\\|\x1B[@-Z\\-_])/g;
+const XML_INVALID_CONTROL_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g;
 
 function escapeXml(text: string): string {
   return text
@@ -42,9 +45,49 @@ function displayWidth(str: string): number {
   return width;
 }
 
+function normalizeTerminalText(text: string): string {
+  return text
+    .replace(ANSI_ESCAPE_RE, "")
+    .replace(XML_INVALID_CONTROL_RE, "");
+}
+
+function charDisplayWidth(ch: string): number {
+  return displayWidth(ch);
+}
+
+function wrapDisplayLine(line: string, maxColumns: number = MAX_DISPLAY_COLUMNS): string[] {
+  if (displayWidth(line) <= maxColumns) {
+    return [line];
+  }
+
+  const wrapped: string[] = [];
+  let current = "";
+  let currentWidth = 0;
+
+  for (const ch of line) {
+    const width = charDisplayWidth(ch);
+    if (current && currentWidth + width > maxColumns) {
+      wrapped.push(current);
+      current = "";
+      currentWidth = 0;
+    }
+    current += ch;
+    currentWidth += width;
+  }
+
+  wrapped.push(current);
+  return wrapped;
+}
+
+function prepareTerminalLines(text: string): string[] {
+  return normalizeTerminalText(text)
+    .split("\n")
+    .flatMap((line) => wrapDisplayLine(line));
+}
+
 export async function renderTerminalImage(text: string): Promise<Buffer> {
   const { family: FONT_FAMILY, size: FONT_SIZE, lineHeight: LINE_HEIGHT, charWidth: CHAR_WIDTH } = getConfig().font;
-  const lines = text.split("\n");
+  const lines = prepareTerminalLines(text);
   const maxDisplayWidth = Math.max(...lines.map(displayWidth), 1);
 
   const contentWidth = Math.max(maxDisplayWidth * CHAR_WIDTH, MIN_WIDTH);
@@ -76,3 +119,5 @@ export async function renderTerminalImage(text: string): Promise<Buffer> {
 // 仅用于测试
 export const __escapeXmlForTests = escapeXml;
 export const __displayWidthForTests = displayWidth;
+export const __normalizeTerminalTextForTests = normalizeTerminalText;
+export const __prepareTerminalLinesForTests = prepareTerminalLines;
