@@ -30,21 +30,27 @@ async function captureByPageScroll(
   totalLines: number,
 ): Promise<string> {
   const args = targetArgs("read-screen", target);
-  const screens: string[] = [];
-  let prevContent = "";
+
+  // Read visible screen to determine page size
+  const { stdout: visibleRaw } = await runCmux(args);
+  const visibleLines = visibleRaw.split("\n").length;
+  const pages = Math.ceil(totalLines / Math.max(visibleLines, 1));
+
+  const screens: string[] = [visibleRaw];
+  let prevContent = visibleRaw;
   let pageupsSent = 0;
 
-  for (let i = 0; i < totalLines; i++) {
+  for (let i = 1; i < pages; i++) {
+    // Scroll up to see older content
+    await runCmux([...targetArgs("send-key", target), "--", "pageup"]);
+    await sleep(SCROLL_WAIT_MS);
+
     const { stdout } = await runCmux(args);
     // Stop if content didn't change (reached top of history)
     if (stdout === prevContent) break;
     screens.push(stdout);
     prevContent = stdout;
-
-    // Page up to see older content
-    await runCmux([...targetArgs("send-key", target), "--", "pageup"]);
     pageupsSent++;
-    await sleep(SCROLL_WAIT_MS);
   }
 
   // Restore position: send pagedown for each pageup we sent
