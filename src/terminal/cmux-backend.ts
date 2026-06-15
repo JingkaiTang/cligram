@@ -30,31 +30,25 @@ async function captureByPageScroll(
   totalLines: number,
 ): Promise<string> {
   const args = targetArgs("read-screen", target);
-
-  // Read visible screen to determine page size
-  const { stdout: visibleRaw } = await runCmux(args);
-  const visibleLines = visibleRaw.split("\n").length;
-  const pages = Math.ceil(totalLines / Math.max(visibleLines, 1));
-
   const screens: string[] = [];
   let prevContent = "";
+  let pageupsSent = 0;
 
-  for (let i = 0; i < pages; i++) {
+  for (let i = 0; i < totalLines; i++) {
     const { stdout } = await runCmux(args);
     // Stop if content didn't change (reached top of history)
     if (stdout === prevContent) break;
     screens.push(stdout);
     prevContent = stdout;
 
-    if (i < pages - 1) {
-      await runCmux([...targetArgs("send-key", target), "--", "pageup"]);
-      await sleep(SCROLL_WAIT_MS);
-    }
+    // Page up to see older content
+    await runCmux([...targetArgs("send-key", target), "--", "pageup"]);
+    pageupsSent++;
+    await sleep(SCROLL_WAIT_MS);
   }
 
   // Restore position: send pagedown for each pageup we sent
-  const scrollCount = screens.length - 1;
-  for (let i = 0; i < scrollCount; i++) {
+  for (let i = 0; i < pageupsSent; i++) {
     await runCmux([...targetArgs("send-key", target), "--", "pagedown"]);
   }
 
@@ -160,13 +154,18 @@ export function createCmuxBackend(deps: CmuxBackendDeps = {}): TerminalBackend {
     },
 
     async capturePane(target, lines = CAPTURE_LINES) {
-      const { stdout } = await runCmux([
-        ...targetArgs("read-screen", requireCmuxTarget(target)),
-        "--scrollback",
-        "--lines",
-        String(lines),
-      ]);
-      return stdout;
+      const cmuxTarget = requireCmuxTarget(target);
+      const args = targetArgs("read-screen", cmuxTarget);
+      const { stdout } = await runCmux([...args, "--scrollback", "--lines", String(lines)]);
+
+      // Check if --scrollback actually returned extra content
+      const scrollbackLines = stdout.split("\n").length;
+      if (scrollbackLines > lines * 0.5) {
+        return stdout;
+      }
+
+      // Fallback: scroll through pages using pageup
+      return captureByPageScroll(runCmux, cmuxTarget, lines);
     },
 
     async captureVisible(target) {

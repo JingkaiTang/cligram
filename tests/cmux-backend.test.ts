@@ -143,37 +143,16 @@ test("cmux backend: sends text, keys, and scrollback capture to explicit workspa
   await backend.sendKey(target, "C-c");
   assert.equal(await backend.capturePane(target, 50), "screen text");
 
-  assert.deepEqual(calls, [
-    {
-      command: "/opt/cmux",
-      args: ["send", "--workspace", "workspace:1", "--surface", "surface:2", "--", "text"],
-    },
-    {
-      command: "/opt/cmux",
-      args: [
-        "send-key",
-        "--workspace",
-        "workspace:1",
-        "--surface",
-        "surface:2",
-        "--",
-        "ctrl+c",
-      ],
-    },
-    {
-      command: "/opt/cmux",
-      args: [
-        "read-screen",
-        "--workspace",
-        "workspace:1",
-        "--surface",
-        "surface:2",
-        "--scrollback",
-        "--lines",
-        "50",
-      ],
-    },
+  const surfaceArgs = ["--workspace", "workspace:1", "--surface", "surface:2"];
+  assert.deepEqual(calls.slice(0, 3), [
+    { command: "/opt/cmux", args: ["send", ...surfaceArgs, "--", "text"] },
+    { command: "/opt/cmux", args: ["send-key", ...surfaceArgs, "--", "ctrl+c"] },
+    { command: "/opt/cmux", args: ["read-screen", ...surfaceArgs, "--scrollback", "--lines", "50"] },
   ]);
+
+  // When scrollback returns fewer lines than expected, capturePane falls back to page scroll
+  const keyCalls = calls.filter((c) => c.args[0] === "send-key");
+  assert.ok(keyCalls.some((c) => c.args[c.args.length - 1] === "pageup"), "expected pageup");
 });
 
 test("cmux backend: visible capture reads current screen without scrollback args", async () => {
