@@ -315,3 +315,126 @@ test("cmux backend: openInTerminal throws readable unsupported error", async () 
     message: /cmux.*暂不支持.*打开|open/i,
   });
 });
+
+test("cmux backend: capturePane returns scrollback when available", async () => {
+  const scrollbackContent = Array.from({ length: 150 }, (_, i) => `line ${i}`).join("\n");
+  const calls: CmuxCall[] = [];
+  const backend = createCmuxBackend({
+    async run(command, args) {
+      calls.push({ command, args });
+      if (args[0] === "read-screen") {
+        if (args.includes("--scrollback")) {
+          return { stdout: scrollbackContent, stderr: "" };
+        }
+        return { stdout: "visible screen", stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    },
+    getCmuxPath() { return "/opt/cmux"; },
+    getStartDir() { return "/tmp"; },
+  });
+
+  const result = await backend.capturePane(cmuxTarget(), 200);
+  assert.equal(result, scrollbackContent);
+
+  const keyCalls = calls.filter(c => c.args[0] === "send-key");
+  assert.equal(keyCalls.length, 0);
+});
+
+test("cmux backend: capturePane falls back to pageup scroll when scrollback is empty", async () => {
+  const visibleContent = "line1\nline2\nline3\nline4\nline5";
+  const scrolledContent = "older1\nolder2\nolder3\nolder4\nolder5";
+  let readScreenCallCount = 0;
+  const calls: CmuxCall[] = [];
+
+  const backend = createCmuxBackend({
+    async run(command, args) {
+      calls.push({ command, args });
+      if (args[0] === "read-screen") {
+        if (args.includes("--scrollback")) {
+          return { stdout: visibleContent, stderr: "" };
+        }
+        readScreenCallCount++;
+        if (readScreenCallCount === 1) {
+          return { stdout: visibleContent, stderr: "" };
+        }
+        return { stdout: scrolledContent, stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    },
+    getCmuxPath() { return "/opt/cmux"; },
+    getStartDir() { return "/tmp"; },
+  });
+
+  const result = await backend.capturePane(cmuxTarget(), 100);
+
+  assert.ok(result.includes("line1"));
+  assert.ok(result.includes("older1"));
+
+  const keyCalls = calls.filter(c => c.args[0] === "send-key");
+  const keyNames = keyCalls.map(c => c.args[c.args.length - 1]);
+  assert.ok(keyNames.includes("pageup"), `expected pageup in ${keyNames}`);
+  assert.ok(keyNames.includes("pagedown"), `expected pagedown in ${keyNames}`);
+});
+
+test("cmux backend: capturePane stops scrolling when content repeats (reached top)", async () => {
+  const sameContent = "top of history\nline2\nline3";
+  let readScreenCount = 0;
+  const calls: CmuxCall[] = [];
+
+  const backend = createCmuxBackend({
+    async run(command, args) {
+      calls.push({ command, args });
+      if (args[0] === "read-screen") {
+        if (args.includes("--scrollback")) {
+          return { stdout: sameContent, stderr: "" };
+        }
+        readScreenCount++;
+        return { stdout: sameContent, stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    },
+    getCmuxPath() { return "/opt/cmux"; },
+    getStartDir() { return "/tmp"; },
+  });
+
+  await backend.capturePane(cmuxTarget(), 200);
+
+  const readScreenCalls = calls.filter(c => c.args[0] === "read-screen");
+  assert.ok(readScreenCalls.length <= 3, `too many read-screen calls: ${readScreenCalls.length}`);
+});
+
+test("cmux backend: capturePane sends correct number of pagedown to restore position", async () => {
+  const page1 = "page1_line1\npage1_line2";
+  const page2 = "page2_line1\npage2_line2";
+  const page3 = "page3_line1\npage3_line2";
+  let readScreenCount = 0;
+  const calls: CmuxCall[] = [];
+
+  const backend = createCmuxBackend({
+    async run(command, args) {
+      calls.push({ command, args });
+      if (args[0] === "read-screen") {
+        if (args.includes("--scrollback")) {
+          return { stdout: page1, stderr: "" };
+        }
+        readScreenCount++;
+        if (readScreenCount <= 2) return { stdout: page1, stderr: "" };
+        if (readScreenCount <= 4) return { stdout: page2, stderr: "" };
+        return { stdout: page3, stderr: "" };
+      }
+      return { stdout: "", stderr: "" };
+    },
+    getCmuxPath() { return "/opt/cmux"; },
+    getStartDir() { return "/tmp"; },
+  });
+
+  await backend.capturePane(cmuxTarget(), 200);
+
+  const keyCalls = calls.filter(c => c.args[0] === "send-key");
+  const keyNames = keyCalls.map(c => c.args[c.args.length - 1]);
+  const pageupCount = keyNames.filter(k => k === "pageup").length;
+  const pagedownCount = keyNames.filter(k => k === "pagedown").length;
+
+  assert.equal(pagedownCount, pageupCount, `pagedown(${pagedownCount}) should match pageup(${pageupCount})`);
+});
